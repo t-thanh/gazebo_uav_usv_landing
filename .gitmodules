@@ -7,3 +7,9 @@
 [submodule "ros/src/uav_sim/uav_core"]
 	path = ros/src/uav_sim/uav_core
 	url = https://github.com/t-thanh/uav_core.git
+[submodule "ros/src/ros_landing/uav_gimbal"]
+	path = ros/src/ros_landing/uav_gimbal
+	url = https://github.com/t-thanh/uav_gimbal.git
+[submodule "ros/src/ros_landing/gimbal_usv_tracker"]
+	path = ros/src/ros_landing/gimbal_usv_tracker
+	url = https://github.com/t-thanh/gimbal_usv_tracker.git
