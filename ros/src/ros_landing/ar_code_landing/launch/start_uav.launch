@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<!--
+  start_uav.launch
+  ─────────────────
+  Arm + takeoff sequence for the landing scenario.
+  Identical to otter_gazebo/launch/start_uav.launch — included here so the
+  landing scenario is self-contained within the ar_code_landing package.
+
+  Timeline:
+    t = 0 s  launch
+    t = 5 s  motors enabled
+    t = 7 s  UAV armed
+    t = 9 s  OFFBOARD mode set
+    t = 11 s takeoff (MRS default altitude: ~2.5 m)
+
+  Run AFTER usv_uav_gimbal_landing.launch.
+-->
+<launch>
+
+  <!-- MRS UAV core stack -->
+  <include file="$(find mrs_uav_general)/launch/core.launch">
+    <arg name="config_uav_manager"
+         value="/home/t-thanh/Garage/uav_usv_sim/src/uav_sim/simulation/example_tmux_scripts/just_flying_bare_tmux/custom_configs/uav_manager.yaml"/>
+  </include>
+
+  <!-- 1. Enable motors (5 s — EKF2 needs ~4 s to converge) -->
+  <node pkg="rosservice" type="rosservice" name="enable_motors"
+        launch-prefix="bash -c 'sleep 5; $0 $@'"
+        args="call /uav1/control_manager/motors 1"/>
+
+  <!-- 2. Arm -->
+  <node pkg="rosservice" type="rosservice" name="arm_drone"
+        launch-prefix="bash -c 'sleep 7; $0 $@'"
+        args="call /uav1/mavros/cmd/arming 1"/>
+
+  <!-- 3. OFFBOARD mode -->
+  <node pkg="rosservice" type="rosservice" name="set_offboard_mode"
+        launch-prefix="bash -c 'sleep 9; $0 $@'"
+        args="call --wait /uav1/mavros/set_mode 0 offboard"/>
+
+  <!-- 4. Takeoff -->
+  <node pkg="rosservice" type="rosservice" name="takeoff"
+        launch-prefix="bash -c 'sleep 11; $0 $@'"
+        args="call --wait /uav1/uav_manager/takeoff"/>
+
+</launch>

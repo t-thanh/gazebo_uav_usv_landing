@@ -1,0 +1,122 @@
+<!--
+  moving_usv_env.launch
+  ──────────────────────
+  Gazebo environment for UAV landing on a moving USV demo.
+
+  World  : usv_uav.world (ocean + MRS physics)
+  USV    : Otter spawned at (usv_start_x, 0, 0), driven kinematically at
+           usv_speed m/s in +X with sinusoidal heave / roll / pitch.
+  UAV    : X500 with Garmin rangefinder + ground truth, spawned at
+           (0, uav_y, 1) — laterally offset from the USV track so the
+           takeoff pad is clear when the USV passes through x = 0.
+  Gimbal : standalone uav1_gimbal model at the same XY as the drone.
+
+  USV motion
+  ──────────
+  The Otter is spawned with direct_control_plugin:=true, which makes the
+  usv_gazebo_direct_control_plugin subscribe to 'usv_data' and call
+  SetWorldPose + SetLinearVel every physics tick.
+  usv_motion_node.py publishes that topic at 100 Hz.
+
+  Sea state defaults:
+    heave  ±10 cm @ 0.40 Hz
+    roll    ±8°  @ 0.30 Hz
+    pitch   ±5°  @ 0.50 Hz
+
+  Key overrides:
+    usv_speed:=1.5       # m/s forward speed
+    usv_start_x:=-40.0  # m  (more buffer before USV reaches drone area)
+    uav_y:=10.0          # m  (lateral offset from USV track)
+    gui:=false           # headless mode
+-->
+<launch>
+
+  <!-- ── Tunable args ───────────────────────────────────────────────────── -->
+  <arg name="gui"          default="true"/>
+  <arg name="verbose"      default="false"/>
+
+  <!-- USV motion -->
+  <arg name="usv_speed"    default="1.0"/>     <!-- m/s forward speed        -->
+  <arg name="usv_start_x"  default="-30.0"/>   <!-- m  start behind origin   -->
+
+  <!-- Drone takeoff position — 15 m to the side of USV track (y=0); never in the USV path -->
+  <arg name="uav_y"        default="15.0"/>    <!-- m  lateral offset from track -->
+
+  <!-- ── Gazebo world ───────────────────────────────────────────────────── -->
+  <param name="/use_sim_time" value="true"/>
+
+  <!-- Kill any previous Gazebo / PX4 / MAVROS session -->
+  <node pkg="mrs_simulation" type="kill_previous_session.sh"
+        name="kill_previous_session" output="screen"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find usv_worlds)/worlds/usv_uav.world"/>
+    <arg name="paused"     value="false"/>
+    <arg name="gui"        value="$(arg gui)"/>
+    <arg name="verbose"    value="$(arg verbose)"/>
+  </include>
+
+  <!-- Suppress the per-call INFO flood from gazebo_ros_api_plugin -->
+  <node name="gz_logger_suppress" pkg="rosservice" type="rosservice"
+        args="call --wait /gazebo/set_logger_level '{logger: ros.gazebo_ros, level: warn}'"
+        output="log"/>
+
+  <!-- ── Spawn Otter USV at offset start position ──────────────────────── -->
+  <!-- Standard physics mode: thrusters + buoyancy + hydrodynamics active.
+       usv_motion_node drives left_thrust_cmd / right_thrust_cmd and applies
+       a sinusoidal wrench via /gazebo/apply_body_wrench for sea-state. -->
+  <param name="robot_description"
+         command="$(find xacro)/xacro
+                  $(find otter_gazebo)/urdf/otter_gazebo.urdf.xacro
+                  imu_enabled:=true
+                  gps_enabled:=true
+                  lidar_enabled:=false
+                  velodyne_enabled:=false
+                  top_camera_enabled:=false
+                  ground_truth_enabled:=true
+                  direct_control_plugin:=false"/>
+
+  <node name="usv_spawner" pkg="gazebo_ros" type="spawn_model"
+        respawn="false" output="screen"
+        args="-x $(arg usv_start_x) -y 0.0 -z 0.0
+              -R 0 -P 0 -Y 0
+              -urdf -param /robot_description -model otter"/>
+
+  <node pkg="robot_state_publisher" type="robot_state_publisher"
+        name="rob_st_pub"/>
+
+  <!-- ── MRS drone spawner ─────────────────────────────────────────────── -->
+  <include file="$(find mrs_simulation)/launch/mrs_drone_spawner.launch"/>
+
+  <!-- X500 with downward Garmin and ground truth.
+       Spawned at (0, uav_y, 1) — clear of the USV track at y=0. -->
+  <node pkg="rosservice" type="rosservice" name="spawn_drone"
+        args="call --wait /mrs_drone_spawner/spawn
+              '1 x500 --enable-rangefinder --enable-ground-truth --pos 0 $(arg uav_y) 1 0'"/>
+
+  <!-- ── Standalone gimbal model ───────────────────────────────────────── -->
+  <!-- Spawned at drone XY; the gimbal_position_node keeps it attached. -->
+  <node name="spawn_gimbal" pkg="gazebo_ros" type="spawn_model"
+        args="-file $(find uav_gimbal)/models/gimbal_ghadron_standalone/model.sdf
+              -sdf -model uav1_gimbal -x 0.0 -y $(arg uav_y) -z 1.0"
+        output="screen"/>
+
+  <!-- Gimbal position controller — tracks uav1 ground truth and moves the
+       standalone gimbal model to follow the drone. -->
+  <include file="$(find uav_gimbal)/launch/gimbal_controllers.launch">
+    <arg name="ns" value="uav1"/>
+  </include>
+
+  <!-- ── USV kinematic motion ──────────────────────────────────────────── -->
+  <!-- Publishes to 'usv_data' at 100 Hz.
+       Debug topics: /uav_otter_landing/usv_pose_cmd, /uav_otter_landing/usv_odom -->
+  <node name="usv_motion" pkg="uav_otter_landing" type="usv_motion_node.py"
+        output="screen">
+    <rosparam command="load"
+              file="$(find uav_otter_landing)/config/usv_motion_params.yaml"/>
+    <!-- Launch-arg overrides -->
+    <param name="usv_speed"   value="$(arg usv_speed)"/>
+    <param name="usv_start_x" value="$(arg usv_start_x)"/>
+  </node>
+
+</launch>

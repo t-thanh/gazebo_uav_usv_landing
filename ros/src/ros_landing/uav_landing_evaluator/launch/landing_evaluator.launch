@@ -1,0 +1,96 @@
+<!--
+  landing_evaluator.launch
+  ─────────────────────────
+  Drop-test evaluation for UAV landing on a USV deck.
+
+  Starts a minimal Gazebo world (ocean + physics from usv_uav.world), spawns:
+    • usv_deck          — static platform representing the Otter USV (2 × 1.08 m)
+    • landing_pad_sensor — 0.8 × 0.8 m contact sensor pad on top of the deck
+    • drop_uav          — free-falling rigid body (mass = 2 kg, no control)
+
+  The landing_evaluator_node then:
+    1. Teleports drop_uav to N random positions above the pad.
+    2. Records velocity, attitude, and position at first contact.
+    3. Computes: fall_time, KE_total, KE_vertical, tilt_deg, miss_distance, score.
+    4. Prints a summary table and writes results to CSV.
+
+  Usage:
+    roslaunch uav_landing_evaluator landing_evaluator.launch
+
+  Key overrides:
+    n_scenarios:=10           # number of drop tests
+    drop_height:=20.0         # release altitude above pad [m]
+    xy_range:=3.0             # horizontal scatter radius [m]
+    csv_output:=/tmp/res.csv  # result file path
+    gui:=false                # headless mode
+-->
+<launch>
+
+  <!-- ── Tunable args ───────────────────────────────────────────────────── -->
+  <arg name="gui"           default="true"/>
+  <arg name="n_scenarios"   default="5"/>
+  <arg name="drop_height"   default="15.0"/>
+  <arg name="xy_range"      default="2.0"/>
+  <arg name="tilt_range_deg" default="15.0"/>
+  <arg name="csv_output"    default="/tmp/landing_eval_results.csv"/>
+
+  <!-- Landing pad position: deck top is at z=0.35, pad centre at z=0.355 -->
+  <arg name="pad_x"         default="0.0"/>
+  <arg name="pad_y"         default="0.0"/>
+  <arg name="pad_z"         default="0.355"/>
+
+  <!-- ── Gazebo world ───────────────────────────────────────────────────── -->
+  <param name="/use_sim_time" value="true"/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name"
+         value="$(find uav_landing_evaluator)/worlds/drop_test.world"/>
+    <arg name="paused"   value="false"/>
+    <arg name="gui"      value="$(arg gui)"/>
+    <arg name="verbose"  value="false"/>
+  </include>
+
+  <!-- ── Spawn USV deck (static, at world origin) ────────────────────────
+       Deck top face at z = 0.35 m. -->
+  <node name="spawn_usv_deck" pkg="gazebo_ros" type="spawn_model"
+        output="log"
+        args="-sdf -model usv_deck
+              -file $(find uav_landing_evaluator)/models/usv_deck/model.sdf
+              -x 0.0 -y 0.0 -z 0.0"/>
+
+  <!-- ── Spawn landing pad sensor (on top of USV deck) ───────────────────
+       Centre at (pad_x, pad_y, pad_z).  Red 0.8×0.8 m visible square.
+       Publishes /landing_pad/contact (gazebo_msgs/ContactsState). -->
+  <node name="spawn_landing_pad" pkg="gazebo_ros" type="spawn_model"
+        output="log"
+        args="-sdf -model landing_pad_sensor
+              -file $(find uav_landing_evaluator)/models/landing_pad_sensor/model.sdf
+              -x $(arg pad_x) -y $(arg pad_y) -z $(arg pad_z)"/>
+
+  <!-- ── Spawn drop UAV (parked high above until evaluator repositions it) -->
+  <node name="spawn_drop_uav" pkg="gazebo_ros" type="spawn_model"
+        output="log"
+        args="-sdf -model drop_uav
+              -file $(find uav_landing_evaluator)/models/drop_uav/model.sdf
+              -x $(arg pad_x) -y $(arg pad_y) -z 100.0"/>
+
+  <!-- ── Landing evaluator node ─────────────────────────────────────────── -->
+  <node name="landing_evaluator" pkg="uav_landing_evaluator"
+        type="landing_evaluator_node.py" output="screen" required="true">
+
+    <!-- Scenario parameters (launch-arg overrides) -->
+    <param name="n_scenarios"    value="$(arg n_scenarios)"/>
+    <param name="drop_height"    value="$(arg drop_height)"/>
+    <param name="xy_range"       value="$(arg xy_range)"/>
+    <param name="tilt_range_deg" value="$(arg tilt_range_deg)"/>
+    <param name="csv_output"     value="$(arg csv_output)"/>
+    <rosparam param="pad_center">
+      [$(arg pad_x), $(arg pad_y), $(arg pad_z)]
+    </rosparam>
+
+    <!-- All other params from YAML -->
+    <rosparam command="load"
+              file="$(find uav_landing_evaluator)/config/evaluator_params.yaml"/>
+  </node>
+
+</launch>

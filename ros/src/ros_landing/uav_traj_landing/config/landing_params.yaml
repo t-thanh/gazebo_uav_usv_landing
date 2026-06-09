@@ -1,0 +1,157 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# uav_traj_landing — tunable parameters
+# ─────────────────────────────────────────────────────────────────────────────
+# Architecture comparison with ar_code_landing:
+#   ar_code_landing : altitude PID + horizontal PD → attitude target
+#   uav_traj_landing: 5th-order polynomial (or time-optimal) trajectory →
+#                     pluggable attitude controller → attitude target
+#
+# Selectable controllers (controller_type param):
+#   smc  — Sliding Mode Controller, Super-Twisting (default; feedforward)
+#   pid  — Classical PID (no feedforward; simple baseline)
+#   mpc  — Linear MPC, condensed QP (horizon feedforward; pure Python)
+#
+# The gimbal_aruco_tracker_node (gimbal_aruco_tracker section below) is
+# identical to ar_code_landing — that node is reused unchanged.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# UAV / simulation namespace
+ns: uav1
+
+# ── Gimbal ArUco tracker ──────────────────────────────────────────────────────
+# (identical to ar_code_landing — node is shared)
+gimbal_aruco_tracker:
+  rate_hz:           30.0
+  pos_filter_alpha:  0.4
+  max_pos_jump_m:    5.0
+  kp_yaw:   0.15
+  ki_yaw:   0.02
+  kd_yaw:   0.05
+  kp_pitch: 0.15
+  ki_pitch: 0.02
+  kd_pitch: 0.05
+  max_integral:   0.3
+  max_cmd_delta:  0.04
+  error_deadband: 0.01
+  lost_timeout_s: 3.0
+  min_altitude_m: 2.0
+  min_pitch_rad:  0.5
+  x_offset: 0.10
+  y_offset: 0.00
+  z_offset: 0.00
+
+# ── Trajectory landing controller ─────────────────────────────────────────────
+traj_landing_controller:
+  rate_hz: 50.0
+
+  # ── Drone physical parameters (used by SMC for gravity compensation) ────────
+  drone_mass:    2.0      # kg  (X500 with payload)
+  hover_thrust:  0.58     # normalised [0-1] that produces 1 g of net force
+
+  # ── Sliding Mode Controller (Super-Twisting Algorithm) ──────────────────────
+  # λ-surface: s = lambda_s * pos_error + vel_error
+  # Higher lambda_s → stiffer surface (faster settling, less phase margin)
+  smc_lambda: [1.5, 1.5, 2.0]      # [x, y, z]
+
+  # STA gains: u = -k1*|s|^0.5*sign(s) + integral;  d(integral)/dt = -k2*sign(s)
+  # k1 drives |s|→0 via sqrt law (smooth),  k2 handles constant disturbances
+  smc_k1: [1.2, 1.2, 1.5]
+  smc_k2: [0.7, 0.7, 1.0]
+
+  # Anti-windup clamp on the STA integral term [m/s^2]
+  smc_integral_limit: 2.0
+
+  # Maximum roll/pitch tilt command [deg] (safety limit)
+  max_tilt_deg: 25.0
+
+  # ── Trajectory parameters ────────────────────────────────────────────────────
+  # Maximum velocity in the generated trajectory [m/s]
+  traj_v_max_ms: 3.0
+
+  # Minimum trajectory duration [s] — prevents very fast aggressive manoeuvres
+  traj_t_min_s: 2.0
+
+  # Replan when target moves more than this distance [m] from trajectory endpoint
+  replan_distance_m: 0.5
+
+  # Minimum interval between replanning calls [s] — rate-limits the NLP solver
+  replan_interval_s: 2.0
+
+  # Time after which a target pose is considered stale [s]
+  pose_timeout_s: 3.0
+
+  # ── Controller selection ─────────────────────────────────────────────────────
+  # One of: pid (default), smc, mpc
+  controller_type: pid
+
+  # ── Optional: rpg_time_optimal (uzh-rpg/rpg_time_optimal) ───────────────────
+  # Set use_time_optimal: true to replace polynomial with true time-optimal NLP.
+  # Requires: pip install casadi  AND  git clone uzh-rpg/rpg_time_optimal
+  # rpg_time_optimal_path must point to the repo's 'src' directory.
+  use_time_optimal: false
+  rpg_time_optimal_path: ""          # e.g. "/home/user/rpg_time_optimal/src"
+  quad_params_file: ""               # path to quad.yaml for rpg_time_optimal
+
+  # ── PID controller (controller_type: pid) ────────────────────────────────────
+  # Gains adapted from CrazyTraj AttitudeController (no feedforward acceleration).
+  # Tune kp first; increase kd to damp oscillation; ki for steady-state offset.
+  pid_kp:       [0.4,  0.4,  1.25]   # proportional [x, y, z]
+  pid_ki:       [0.05, 0.05, 0.05]   # integral
+  pid_kd:       [0.2,  0.2,  0.4]    # derivative
+  pid_ki_range: [2.0,  2.0,  0.4]    # anti-windup clamp [m/s²]
+
+  # ── Linear MPC controller (controller_type: mpc) ─────────────────────────────
+  # Double-integrator model; condensed QP; pure Python (no Acados).
+  # Horizon: mpc_N steps × mpc_dt seconds = mpc_N * mpc_dt seconds lookahead.
+  # Weights adapted from CrazyTraj MPC (Q scaled up for altitude).
+  mpc_N:       20       # horizon length (steps)
+  mpc_dt:      0.05     # MPC step size [s] (does not need to match ctrl loop dt)
+  mpc_Q_pos:   [50.0,  50.0,  400.0]   # position error weight [x, y, z]
+  mpc_Q_vel:   [10.0,  10.0,   10.0]   # velocity error weight
+  mpc_Q_pos_N: [250.0, 250.0, 2000.0]  # terminal position weight (5×)
+  mpc_Q_vel_N: [50.0,  50.0,   50.0]   # terminal velocity weight (5×)
+  mpc_R_acc:   [1.0,   1.0,    1.0]    # acceleration input cost
+  mpc_a_max:   15.0     # acceleration clamp [m/s²] (safety limit)
+
+# ── State machine ─────────────────────────────────────────────────────────────
+traj_landing_sm:
+  # Target climb altitude before starting search [m]
+  climb_alt_m: 10.0
+
+  # Hover altitude during TRAJECTORY_ALIGN phase [m]
+  hold_alt_m:  5.0
+
+  # Alignment threshold: |e_xy| below which ALIGN→DESCEND [m]
+  align_threshold_m:  0.6
+  align_settle_s:     3.0
+
+  # Descent: rate [m/s] at which target altitude decreases
+  descent_rate_ms:    0.3
+
+  # Rate at which commanded altitude ramps down from climb_alt to hold_alt [m/s]
+  # Prevents aggressive drop; trajectory planner also smooths the motion,
+  # but the rate limit keeps individual trajectory segments short.
+  alt_down_rate_ms: 1.0
+
+  # Dynamic descent rate params (close approach, same as ar_code_landing)
+  close_descent_alt_m:   2.5
+  desc_err_scale_m:      0.5
+  desc_min_pos_factor:   0.05
+  desc_min_alt_factor:   0.5
+
+  # Garmin range below which touch-down is declared [m]
+  touch_range_m: 0.8
+
+  # ArUco lost timeout in DESCEND before recovery HOVER [s]
+  descend_lost_timeout_s: 4.0
+
+  # State machine loop rate [Hz]
+  rate_hz: 10.0
+
+  # Timeouts [s]
+  prearm_timeout_s:  10.0
+  arming_timeout_s:  30.0
+  climb_timeout_s:   60.0
+  nadir_timeout_s:   15.0
+  search_timeout_s:  60.0
+  align_timeout_s:  120.0

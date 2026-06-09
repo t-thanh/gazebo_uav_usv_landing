@@ -1,0 +1,85 @@
+<?xml version="1.0"?>
+<!--
+  landing_pad_sensor — thin contact-sensor pad placed on top of the USV deck.
+
+  Geometry: 0.8 × 0.8 × 0.01 m box (red, easily visible from above).
+  The sensor fires whenever the drop_uav touches it.
+
+  Spawned at (pad_x, pad_y, pad_z) where pad_z is the deck top height.
+  The model origin is at the CENTER of the box, so:
+    bottom face = pad_z − 0.005 m  (just above deck surface)
+    top face    = pad_z + 0.005 m
+
+  The gazebo_ros_bumper plugin publishes gazebo_msgs/ContactsState on
+  /landing_pad/contact whenever any body touches the sensor collision.
+-->
+<sdf version="1.6">
+  <model name="landing_pad_sensor">
+    <static>true</static>
+
+    <link name="link">
+      <!-- ── Contact collision geometry ────────────────────────────────── -->
+      <collision name="collision">
+        <geometry>
+          <box><size>0.8 0.8 0.01</size></box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode><mu>0.8</mu><mu2>0.8</mu2></ode>
+          </friction>
+          <contact>
+            <!-- Allow all bodies to collide with this pad -->
+            <collide_bitmask>0xFFFF</collide_bitmask>
+          </contact>
+        </surface>
+      </collision>
+
+      <!-- ── Visual (red square, clearly marks landing zone) ───────────── -->
+      <visual name="pad_visual">
+        <geometry>
+          <box><size>0.8 0.8 0.01</size></box>
+        </geometry>
+        <material>
+          <ambient>0.85 0.15 0.15 0.9</ambient>
+          <diffuse>0.85 0.15 0.15 0.9</diffuse>
+          <emissive>0.3 0.0 0.0 1</emissive>
+        </material>
+      </visual>
+
+      <!-- ── Corner markers for visual alignment ───────────────────────── -->
+      <visual name="marker_NE">
+        <pose>0.35 0.35 0.01 0 0 0</pose>
+        <geometry><box><size>0.05 0.05 0.02</size></box></geometry>
+        <material><ambient>1 1 1 1</ambient></material>
+      </visual>
+      <visual name="marker_NW">
+        <pose>-0.35 0.35 0.01 0 0 0</pose>
+        <geometry><box><size>0.05 0.05 0.02</size></box></geometry>
+        <material><ambient>1 1 1 1</ambient></material>
+      </visual>
+      <visual name="marker_SE">
+        <pose>0.35 -0.35 0.01 0 0 0</pose>
+        <geometry><box><size>0.05 0.05 0.02</size></box></geometry>
+        <material><ambient>1 1 1 1</ambient></material>
+      </visual>
+      <visual name="marker_SW">
+        <pose>-0.35 -0.35 0.01 0 0 0</pose>
+        <geometry><box><size>0.05 0.05 0.02</size></box></geometry>
+        <material><ambient>1 1 1 1</ambient></material>
+      </visual>
+
+      <!-- ── Contact sensor + gazebo_ros_bumper ────────────────────────── -->
+      <sensor name="contact_sensor" type="contact">
+        <always_on>true</always_on>
+        <update_rate>250</update_rate>
+        <contact>
+          <collision>collision</collision>
+        </contact>
+        <plugin name="gazebo_ros_bumper" filename="libgazebo_ros_bumper.so">
+          <bumperTopicName>/landing_pad/contact</bumperTopicName>
+          <frameName>world</frameName>
+        </plugin>
+      </sensor>
+    </link>
+  </model>
+</sdf>

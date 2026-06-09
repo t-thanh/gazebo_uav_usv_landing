@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# uav_otter_landing — USV motion parameters
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Target motion ─────────────────────────────────────────────────────────────
+usv_speed:      1.0     # m/s — desired forward speed (body surge)
+usv_heading:    0.0     # rad — desired world-frame heading (0 = +X direction)
+
+# ── Speed PI controller ────────────────────────────────────────────────────────
+# Surge: tau_surge = Kp*(u_d - u) + Ki*integral(u_d - u)
+# Yaw:   tau_yaw   = Kp_heading * (psi_d - psi)
+# Both converted to left/right thrust via thrust allocation pseudoinverse.
+Kp_speed:    70.0   # N/(m/s)      matches Aquadrone reference controller
+Ki_speed:     5.0   # N/(m/s·s)   integral anti-windup at ±50 N·s
+Kp_heading:  20.0   # N·m/rad
+Kd_heading:   1.0   # N·m/(rad/s) derivative damping (matches reference)
+
+# ── Sea-state disturbance (applied via /gazebo/apply_body_wrench) ─────────────
+#
+# Sinusoidal forces / torques applied to the Otter body at publish_rate Hz.
+# Each force acts for 1.5 control steps so there is no gap between applications.
+#
+# Amplitude tuning guide:
+#   Otter mass ≈ 29 kg, added-mass ≈ 5–8 kg.
+#   ω_heave = 2π × 0.40 Hz = 2.51 rad/s   → required F ≥ (m+ma)·A·ω² ≈ 22 N
+#   Hydrodynamic damping multiplies this ~3–5×.  Start at 100 N and reduce
+#   until peak heave (from /uav_otter_landing/usv_odom z field) ≈ 0.10 m.
+#
+#   Similarly for roll / pitch: start at the values below and halve until
+#   peak angle ≈ desired amplitude.
+
+# Heave: vertical oscillation ±10 cm
+heave_force_amp:  100.0  # N — amplitude of world-Z sinusoidal force
+heave_hz:           0.40  # Hz
+heave_phase:        0.00  # rad
+
+# Roll: rotation about body +X (longitudinal axis) ±8°
+roll_torque_amp:   30.0  # N·m
+roll_hz:            0.30  # Hz
+roll_phase:         0.70  # rad  (~40°, desynchronises from heave)
+
+# Pitch: rotation about body +Y (lateral axis) ±5°
+pitch_torque_amp:  60.0  # N·m
+pitch_hz:           0.50  # Hz
+pitch_phase:        1.30  # rad  (~75°, desynchronises from heave and roll)
+
+# Gazebo body to apply disturbance wrench on (model::link format)
+gazebo_body_name: "otter::base_link"
+
+# ── Publisher rate ────────────────────────────────────────────────────────────
+# Controls both thrust and wrench update rate.  Must be > 2 × max(heave/roll/pitch Hz).
+publish_rate:  50     # Hz
+
+# ── Debug output ──────────────────────────────────────────────────────────────
+# /uav_otter_landing/usv_odom    nav_msgs/Odometry     (ground truth re-stamped)
+# /uav_otter_landing/thrust_cmd  geometry_msgs/Vector3Stamped  (left, right, speed_error)
+publish_debug: true

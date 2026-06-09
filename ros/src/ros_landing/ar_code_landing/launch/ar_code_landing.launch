@@ -1,0 +1,185 @@
+<?xml version="1.0"?>
+<!--
+  ar_code_landing.launch
+  ───────────────────────
+  Full autonomous landing sequence.
+
+  Scenario
+  ────────
+    UAV spawns at (5, 0, 1) via usv_uav_gimbal_landing.launch.
+    start_uav.launch arms + takes off (MRS handles this).
+    This launch adds:
+      1. aruco_pose_estimator_node  — detects outer AprilTag ID=10 (2 m)
+      2. gimbal_aruco_tracker_node  — keeps gimbal centred on deck
+      3. ar_landing_controller_node — attitude+thrust control (ALIGN+DESCEND)
+      4. ar_landing_sm_node         — state machine driver
+
+  Prerequisites (must already be running):
+    roslaunch ar_code_landing usv_uav_gimbal_landing.launch   (Gazebo + UAV at x=5)
+
+  Do NOT run start_uav.launch — the state machine handles arming and OFFBOARD
+  mode itself via pure MAVROS.  Running start_uav.launch would load the MRS
+  core stack which intercepts OFFBOARD mode and prevents the SM from working.
+
+  Usage (full sequence):
+    roslaunch ar_code_landing ar_code_landing.launch
+
+  Arguments
+  ─────────
+    ns            UAV namespace          (default: uav1)
+    config_file   landing_params.yaml   (default: pkg config)
+-->
+<launch>
+
+  <arg name="ns"          default="uav1"/>
+  <arg name="config_file" default="$(find ar_code_landing)/config/landing_params.yaml"/>
+
+  <!--
+    odom_topic: odometry source for drone pose (used in FK → world position).
+      Simulation (default):         /<ns>/ground_truth
+      GPS-denied real operation:    /<ns>/odometry/odom_main
+    Both topics are in the MRS local_origin frame, so goto service coordinates
+    derived from FK are consistent with MRS's internal reference frame.
+  -->
+  <arg name="odom_topic" default="/$(arg ns)/ground_truth"/>
+
+  <!-- ── 1. ArUco / AprilTag pose estimator ─────────────────────────────────
+       Subscribes to overhead gimbal camera.  Publishes:
+         /aruco_pose/outer/usv_in_cam  (PoseStamped in cam optical frame)
+         /aruco_pose/inner/usv_in_cam  (same, for inner marker — not used here)
+  -->
+  <node name="aruco_pose_estimator"
+        pkg="otter_usv_detector"
+        type="aruco_pose_estimator_node.py"
+        output="screen">
+    <param name="gimbal_ns"     value="$(arg ns)"/>
+    <param name="outer_size_m"  value="2.0"/>
+    <param name="inner_size_m"  value="0.2"/>
+    <param name="base_x_offset" value="0.10"/>
+    <param name="base_y_offset" value="0.00"/>
+    <param name="base_z_offset" value="0.00"/>
+  </node>
+
+  <!-- ── 2. Gimbal ArUco tracker ────────────────────────────────────────────
+       Subscribes to /aruco_pose/outer/usv_in_cam.  Publishes:
+         /ar_landing/gimbal_tracker/tracking_status   (TRACKING/SEARCHING/LOST)
+         /ar_landing/gimbal_tracker/usv_world_pose    (PoseStamped world ENU)
+         /<ns>/gimbal/position/yaw/command
+         /<ns>/gimbal/position/pitch/command
+  -->
+  <node name="gimbal_aruco_tracker"
+        pkg="ar_code_landing"
+        type="gimbal_aruco_tracker_node.py"
+        ns="ar_landing/gimbal_tracker"
+        output="screen">
+    <rosparam file="$(arg config_file)" subst_value="true"/>
+    <!-- Only the gimbal_aruco_tracker sub-section keys are loaded: -->
+    <param name="ns"          value="$(arg ns)"/>
+    <param name="pose_topic"  value="/aruco_pose/outer/usv_in_cam"/>
+    <param name="odom_topic"  value="$(arg odom_topic)"/>
+    <!-- PID gains from config -->
+    <param name="rate_hz"          value="30.0"/>
+    <param name="kp_yaw"           value="0.15"/>
+    <param name="ki_yaw"           value="0.02"/>
+    <param name="kd_yaw"           value="0.05"/>
+    <param name="kp_pitch"         value="0.15"/>
+    <param name="ki_pitch"         value="0.02"/>
+    <param name="kd_pitch"         value="0.05"/>
+    <param name="max_integral"     value="0.3"/>
+    <param name="max_cmd_delta"    value="0.04"/>
+    <param name="error_deadband"   value="0.01"/>
+    <param name="pos_filter_alpha" value="0.4"/>
+    <param name="max_pos_jump_m"   value="5.0"/>
+    <param name="lost_timeout_s"   value="3.0"/>
+    <param name="min_altitude_m"   value="0.5"/>
+    <param name="min_pitch_rad"    value="0.5"/>
+    <param name="x_offset"         value="0.10"/>
+    <param name="y_offset"         value="0.00"/>
+    <param name="z_offset"         value="0.00"/>
+  </node>
+
+  <!-- ── 3. Landing controller ──────────────────────────────────────────────
+       Subscribes to:
+         /aruco_pose/outer/usv_in_cam   — lateral error source
+         /<ns>/garmin/range             — altitude
+         /<ns>/mavros/imu/data          — orientation / yaw
+         /<ns>/ground_truth             — velocity (for derivative terms)
+         /<ns>/gimbal/joint_states      — camera FK
+         /ar_landing/landing_ctrl/enable          — Bool from SM
+         /ar_landing/landing_ctrl/target_altitude — Float64 from SM
+       Publishes:
+         /<ns>/mavros/setpoint_raw/attitude      — AttitudeTarget (attitude+thrust)
+         /ar_landing/landing_ctrl/horizontal_error
+         /ar_landing/landing_ctrl/altitude_error
+         /ar_landing/landing_ctrl/status
+  -->
+  <node name="ar_landing_controller"
+        pkg="ar_code_landing"
+        type="ar_landing_controller_node.py"
+        ns="ar_landing/landing_ctrl"
+        output="screen">
+    <param name="ns"              value="$(arg ns)"/>
+    <param name="odom_topic"      value="$(arg odom_topic)"/>
+    <param name="rate_hz"         value="20.0"/>
+    <!-- Horizontal PD — outer marker tracking + velocity damping when stale -->
+    <param name="kp_xy"              value="0.90"/>
+    <param name="kd_xy"              value="0.80"/>
+    <param name="max_tilt_deg"       value="25.0"/>
+    <!-- Altitude PID — tuned to avoid >20 m overshoot:
+         • hover_thrust lowered (closer to actual hover, reduces pre-arm launch force)
+         • kd_z raised 3×           (brakes hard before target, prevents overshoot)
+         • kp_z lowered             (less aggressive response to large initial error)
+         • max_thrust_delta 0.20    (min thrust 0.34 — needed to push through ground effect at <1 m)  -->
+    <param name="hover_thrust"       value="0.54"/>
+    <param name="kp_z"               value="0.20"/>
+    <param name="ki_z"               value="0.01"/>
+    <param name="kd_z"               value="0.60"/>
+    <param name="max_thrust_delta"   value="0.30"/>
+    <param name="pose_timeout_s"     value="2.0"/>
+    <!-- Close-range: boost lateral gains when garmin < 2.5 m (inner ArUco mode) -->
+    <param name="close_range_alt_m"  value="2.5"/>
+    <param name="close_range_xy_gain" value="3.0"/>
+    <param name="x_offset"           value="0.10"/>
+    <param name="y_offset"           value="0.00"/>
+    <param name="z_offset"           value="0.00"/>
+  </node>
+
+  <!-- ── 4. Landing state machine ───────────────────────────────────────────
+       Publishes:
+         /ar_landing/sm/state             — current state name
+         /ar_landing/landing_ctrl/enable  — enables/disables controller
+         /ar_landing/landing_ctrl/target_altitude
+         /<ns>/gimbal/position/pitch/command  — nadir command
+       Calls MRS services:
+         /<ns>/control_manager/goto       — ALIGN/DESCEND goto commands
+         /<ns>/uav_manager/land           — LANDING state
+  -->
+  <node name="ar_landing_sm"
+        pkg="ar_code_landing"
+        type="ar_landing_sm_node.py"
+        ns="ar_landing/sm"
+        output="screen">
+    <param name="ns"                      value="$(arg ns)"/>
+    <param name="hover_thrust"            value="0.54"/>
+    <param name="climb_alt_m"             value="10.0"/>
+    <param name="hold_alt_m"              value="5.0"/>
+    <param name="align_threshold_m"       value="0.6"/>
+    <param name="align_settle_s"          value="3.0"/>
+    <param name="descent_rate_ms"          value="0.3"/>
+    <param name="touch_range_m"           value="0.4"/>
+    <param name="alt_down_rate_ms"        value="1.0"/>
+    <param name="close_descent_alt_m"     value="2.5"/>
+    <param name="desc_err_scale_m"        value="0.5"/>
+    <param name="desc_min_pos_factor"     value="0.05"/>
+    <param name="desc_min_alt_factor"     value="0.5"/>
+    <param name="descend_lost_timeout_s"  value="4.0"/>
+    <param name="rate_hz"                 value="20.0"/>
+    <param name="prearm_timeout_s"        value="10.0"/>
+    <param name="arming_timeout_s"        value="30.0"/>
+    <param name="climb_timeout_s"         value="60.0"/>
+    <param name="nadir_timeout_s"         value="15.0"/>
+    <param name="search_timeout_s"        value="60.0"/>
+    <param name="align_timeout_s"         value="120.0"/>
+  </node>
+
+</launch>

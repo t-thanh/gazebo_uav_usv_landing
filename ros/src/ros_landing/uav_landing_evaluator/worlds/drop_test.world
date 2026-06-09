@@ -1,0 +1,135 @@
+<?xml version="1.0"?>
+<!--
+  drop_test.world
+  ───────────────
+  Drop-test evaluation world for uav_landing_evaluator.
+
+  Derived from usv_worlds/worlds/usv_uav.world.xacro:
+    - Same ODE physics settings and coordinate system
+    - Same ocean + sun + ground plane
+    - Same water_surface_sensor_plane (ghost collision at z=0)
+    - MRS-specific plugins removed (not needed for pure drop tests)
+
+  The USV deck, landing pad sensor, and drop UAV models are spawned
+  separately from the launch file so they can be repositioned at runtime.
+-->
+<sdf version="1.6">
+  <world name="drop_test_world">
+
+    <!-- ── Physics (identical to usv_uav.world) ────────────────────────── -->
+    <physics name="default_physics" default="0" type="ode">
+      <gravity>0 0 -9.8066</gravity>
+      <ode>
+        <solver>
+          <type>quick</type>
+          <iters>10</iters>
+          <sor>1.3</sor>
+          <use_dynamic_moi_rescaling>0</use_dynamic_moi_rescaling>
+        </solver>
+        <constraints>
+          <cfm>0</cfm>
+          <erp>0.2</erp>
+          <contact_max_correcting_vel>100</contact_max_correcting_vel>
+          <contact_surface_layer>0.001</contact_surface_layer>
+        </constraints>
+      </ode>
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>250</real_time_update_rate>
+      <magnetic_field>6.0e-06 2.3e-05 -4.2e-05</magnetic_field>
+    </physics>
+
+    <!-- ── Scene ───────────────────────────────────────────────────────── -->
+    <scene>
+      <shadows>false</shadows>
+      <sky>
+        <clouds><speed>0</speed></clouds>
+      </sky>
+      <grid>false</grid>
+      <origin_visual>false</origin_visual>
+    </scene>
+
+    <!-- ── Coordinate system (identical to usv_uav.world) ──────────────── -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <latitude_deg>47.397743</latitude_deg>
+      <longitude_deg>8.545594</longitude_deg>
+      <elevation>0.0</elevation>
+      <heading_deg>0</heading_deg>
+    </spherical_coordinates>
+
+    <!-- ── GUI camera ───────────────────────────────────────────────────── -->
+    <gui fullscreen='0'>
+      <camera name='user_camera'>
+        <!-- Angled view from side so drop trajectory is visible -->
+        <pose frame=''>-8 -8 8 0 0.45 0.55</pose>
+        <view_controller>orbit</view_controller>
+      </camera>
+    </gui>
+
+    <!-- ── Lighting ─────────────────────────────────────────────────────── -->
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- ── Ocean ────────────────────────────────────────────────────────── -->
+    <include>
+      <pose>0 0 0 0 0 0</pose>
+      <uri>model://ocean</uri>
+    </include>
+
+    <!-- ── Water surface sensor plane ───────────────────────────────────── -->
+    <!-- Ghost collision at z=0 (water level): collide_bitmask=0x0000 so no
+         physical forces, but Gazebo ray sensors (rangefinders) detect it. -->
+    <model name="water_surface_sensor_plane">
+      <static>true</static>
+      <pose>0 0 0 0 0 0</pose>
+      <link name="link">
+        <collision name="water_surface_collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>1000 1000</size>
+            </plane>
+          </geometry>
+          <surface>
+            <contact>
+              <collide_bitmask>0x0000</collide_bitmask>
+            </contact>
+          </surface>
+        </collision>
+      </link>
+    </model>
+
+    <!-- ── Ground plane (below water, for visual completeness) ─────────── -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <pose>0 0 -0.4 0 0 0</pose>
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>250 250</size>
+            </plane>
+          </geometry>
+          <surface>
+            <friction>
+              <ode><mu>1</mu><mu2>1</mu2></ode>
+            </friction>
+          </surface>
+        </collision>
+        <visual name="grass">
+          <pose>0 0 -0.4 0 0 0</pose>
+          <cast_shadows>false</cast_shadows>
+          <geometry>
+            <mesh>
+              <uri>file://grass_plane/meshes/grass_plane.dae</uri>
+            </mesh>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

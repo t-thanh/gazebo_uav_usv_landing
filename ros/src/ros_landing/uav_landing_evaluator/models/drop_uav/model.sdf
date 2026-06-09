@@ -1,0 +1,118 @@
+<?xml version="1.0"?>
+<!--
+  drop_uav — free-falling rigid body representing an X500-class UAV.
+
+  Used exclusively for drop-test evaluation.  No propellers, no control.
+  Falls under gravity alone.  The contact sensor pad detects its impact.
+
+  Physical parameters match the X500 simulation model:
+    mass        : 2.0 kg
+    footprint   : 0.55 × 0.55 m  (motor-to-motor diagonal ≈ 0.78 m)
+    body height : 0.15 m
+    inertia     : approximated as solid box (safe upper bound)
+
+  Visually rendered as a blue-grey box with four arm indicators.
+-->
+<sdf version="1.6">
+  <model name="drop_uav">
+
+    <link name="base_link">
+
+      <!-- ── Inertia (X500: mass 2 kg, box approximation) ──────────────── -->
+      <inertial>
+        <mass>2.0</mass>
+        <pose>0 0 0 0 0 0</pose>
+        <inertia>
+          <!-- Solid box: I = m/12 * (a²+b²) -->
+          <ixx>0.0256</ixx>   <!-- m/12*(0.55²+0.15²) -->
+          <iyy>0.0256</iyy>
+          <izz>0.0504</izz>   <!-- m/12*(0.55²+0.55²) -->
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyz>0</iyz>
+        </inertia>
+      </inertial>
+
+      <!-- ── Collision geometry (main body box) ────────────────────────── -->
+      <collision name="collision">
+        <geometry>
+          <box><size>0.55 0.55 0.15</size></box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode><mu>0.5</mu><mu2>0.5</mu2></ode>
+          </friction>
+          <contact>
+            <ode>
+              <!-- Soft contact: realistic for composite UAV frame -->
+              <kp>1e5</kp>
+              <kd>1e3</kd>
+            </ode>
+          </contact>
+        </surface>
+      </collision>
+
+      <!-- ── Visuals ───────────────────────────────────────────────────── -->
+
+      <!-- Central body -->
+      <visual name="body">
+        <geometry>
+          <box><size>0.20 0.20 0.15</size></box>
+        </geometry>
+        <material>
+          <ambient>0.20 0.35 0.65 1</ambient>
+          <diffuse>0.20 0.35 0.65 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+        </material>
+      </visual>
+
+      <!-- Arm: front-right -->
+      <visual name="arm_fr">
+        <pose>0.19 -0.19 0 0 0 0.785</pose>
+        <geometry><box><size>0.38 0.04 0.04</size></box></geometry>
+        <material><ambient>0.15 0.15 0.15 1</ambient></material>
+      </visual>
+      <!-- Arm: front-left -->
+      <visual name="arm_fl">
+        <pose>0.19 0.19 0 0 0 -0.785</pose>
+        <geometry><box><size>0.38 0.04 0.04</size></box></geometry>
+        <material><ambient>0.15 0.15 0.15 1</ambient></material>
+      </visual>
+      <!-- Arm: rear-right -->
+      <visual name="arm_rr">
+        <pose>-0.19 -0.19 0 0 0 -0.785</pose>
+        <geometry><box><size>0.38 0.04 0.04</size></box></geometry>
+        <material><ambient>0.15 0.15 0.15 1</ambient></material>
+      </visual>
+      <!-- Arm: rear-left -->
+      <visual name="arm_rl">
+        <pose>-0.19 0.19 0 0 0 0.785</pose>
+        <geometry><box><size>0.38 0.04 0.04</size></box></geometry>
+        <material><ambient>0.15 0.15 0.15 1</ambient></material>
+      </visual>
+
+      <!-- Motor discs (four) -->
+      <visual name="motor_fr">
+        <pose>0.275 -0.275 0.04 0 0 0</pose>
+        <geometry><cylinder><radius>0.10</radius><length>0.02</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient></material>
+      </visual>
+      <visual name="motor_fl">
+        <pose>0.275 0.275 0.04 0 0 0</pose>
+        <geometry><cylinder><radius>0.10</radius><length>0.02</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient></material>
+      </visual>
+      <visual name="motor_rr">
+        <pose>-0.275 -0.275 0.04 0 0 0</pose>
+        <geometry><cylinder><radius>0.10</radius><length>0.02</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient></material>
+      </visual>
+      <visual name="motor_rl">
+        <pose>-0.275 0.275 0.04 0 0 0</pose>
+        <geometry><cylinder><radius>0.10</radius><length>0.02</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient></material>
+      </visual>
+
+    </link>
+  </model>
+</sdf>

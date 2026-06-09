@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.0.2)
+project(ocean_rangefinder)
+find_package(catkin REQUIRED COMPONENTS rospy sensor_msgs nav_msgs)
+catkin_package()
+catkin_install_python(PROGRAMS scripts/range_corrector.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

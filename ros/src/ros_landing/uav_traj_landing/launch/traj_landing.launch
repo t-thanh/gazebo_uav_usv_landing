@@ -1,0 +1,83 @@
+<!--
+  traj_landing.launch
+  ────────────────────
+  Trajectory-based UAV landing algorithm nodes.
+
+  Run after usv_uav_gimbal_landing.launch (which starts Gazebo + UAV + USV).
+  Reuses gimbal_aruco_tracker_node from ar_code_landing unchanged.
+
+  Usage:
+    # Terminal 1: start simulation
+    roslaunch ar_code_landing usv_uav_gimbal_landing.launch
+
+    # Terminal 2: start trajectory landing
+    roslaunch uav_traj_landing traj_landing.launch
+
+  To compare with PID control:
+    roslaunch ar_code_landing ar_code_landing.launch   (PID controller)
+    roslaunch uav_traj_landing traj_landing.launch     (this file: SMC + trajectory)
+
+  Optional time-optimal planner (requires rpg_time_optimal + casadi):
+    roslaunch uav_traj_landing traj_landing.launch use_time_optimal:=true \
+      rpg_time_optimal_path:=/path/to/rpg_time_optimal/src \
+      quad_params_file:=$(find uav_traj_landing)/config/quad_params.yaml
+-->
+<launch>
+
+  <arg name="ns"         default="uav1"/>
+  <arg name="config"
+       default="$(find uav_traj_landing)/config/landing_params.yaml"/>
+
+  <!-- Attitude controller selection: pid | smc | mpc -->
+  <arg name="controller_type" default="pid"/>
+
+  <!-- Time-optimal trajectory options (off by default) -->
+  <arg name="use_time_optimal"      default="false"/>
+  <arg name="rpg_time_optimal_path" default=""/>
+  <arg name="quad_params_file"
+       default="$(find uav_traj_landing)/config/quad_params.yaml"/>
+
+  <!-- ── Gimbal ArUco tracker (reused from ar_code_landing) ─────────────────
+       Subscribes to /aruco_pose/{outer,inner}/usv_in_cam (from otter_usv_detector)
+       Publishes /ar_landing/gimbal_tracker/usv_world_pose (consumed by our ctrl) -->
+  <node name="gimbal_aruco_tracker"
+        pkg="ar_code_landing" type="gimbal_aruco_tracker_node.py"
+        output="screen">
+    <param name="ns" value="$(arg ns)"/>
+    <rosparam command="load" file="$(arg config)" subst_value="true"/>
+    <!-- Map namespace: params live under gimbal_aruco_tracker/ in the YAML -->
+    <rosparam command="load"
+              file="$(arg config)"
+              param="gimbal_aruco_tracker"/>
+  </node>
+
+  <!-- ── Trajectory landing controller ────────────────────────────────────── -->
+  <node name="traj_landing_controller"
+        pkg="uav_traj_landing" type="traj_landing_controller_node.py"
+        output="screen">
+    <param name="ns"           value="$(arg ns)"/>
+    <!-- Load all traj_landing_controller params from YAML -->
+    <rosparam command="load"
+              file="$(arg config)"
+              param="traj_landing_controller"/>
+    <!-- Launch-arg overrides -->
+    <param name="controller_type"        value="$(arg controller_type)"/>
+    <param name="use_time_optimal"       value="$(arg use_time_optimal)"/>
+    <param name="rpg_time_optimal_path"  value="$(arg rpg_time_optimal_path)"/>
+    <param name="quad_params_file"       value="$(arg quad_params_file)"/>
+  </node>
+
+  <!-- ── Trajectory landing state machine ──────────────────────────────────── -->
+  <node name="traj_landing_sm"
+        pkg="uav_traj_landing" type="traj_landing_sm_node.py"
+        output="screen">
+    <param name="ns" value="$(arg ns)"/>
+    <!-- Load all traj_landing_sm params from YAML -->
+    <rosparam command="load"
+              file="$(arg config)"
+              param="traj_landing_sm"/>
+    <!-- hover_thrust must match controller -->
+    <param name="hover_thrust" value="0.58"/>
+  </node>
+
+</launch>

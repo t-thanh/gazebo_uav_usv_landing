@@ -1,0 +1,24 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Quadrotor physical parameters for rpg_time_optimal planner
+# (only used when traj_landing_controller.use_time_optimal: true)
+#
+# Reference: https://github.com/uzh-rpg/rpg_time_optimal
+# Tune to match your simulated or real vehicle.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# X500 simulation values
+mass: 2.0              # kg (body + battery)
+arm_length: 0.15       # m  (motor-to-motor / 2)
+inertia: [0.025, 0.025, 0.045]  # kg·m² diagonal [Ixx, Iyy, Izz]
+
+# Thrust limits
+thrust_min: 0.0        # N per motor (zero for non-reversible props)
+TWR_max: 2.8           # max thrust-to-weight ratio (full throttle / hover)
+
+# Angular velocity limits
+omega_max_xy: 10.0     # rad/s
+omega_max_z:  3.0      # rad/s
+
+# Aerodynamic and motor parameters
+torque_coeff: 0.05
+rampup_dist:  35.0

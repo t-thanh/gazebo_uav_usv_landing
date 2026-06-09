@@ -1,0 +1,131 @@
+<?xml version="1.0"?>
+<!--
+  usv_uav_gimbal_landing.launch
+  ──────────────────────────────
+  Simulation world for the AR-code landing scenario.
+
+  Identical to usv_uav_gimbal.launch EXCEPT:
+    • UAV spawns at (5, 0, 2, yaw=0) — on top of the invisible support platform.
+    • Ocean rangefinder bridge is included.
+    • Uses cleanup_session.sh + wait_and_launch.sh flag-gate to prevent the
+      boost::lock_error gzserver crash that occurs when old/new gzserver overlap.
+
+  Usage:
+    roslaunch ar_code_landing usv_uav_gimbal_landing.launch
+    roslaunch ar_code_landing start_uav.launch          (arm + takeoff)
+    roslaunch ar_code_landing ar_code_landing.launch    (full landing sequence)
+-->
+<launch>
+
+  <arg name="world"   default="$(find usv_worlds)/worlds/usv_uav.world"/>
+  <arg name="gui"     default="true"/>
+  <arg name="verbose" default="false"/>
+  <arg name="reset"   default="true"/>
+
+  <!-- ── Session cleanup ───────────────────────────────────────────────────────
+       Replaces mrs_simulation/kill_previous_session.sh.
+       Kills gzserver (not just the GUI 'gazebo' binary) and WAITS for it to
+       fully die before removing /tmp/landing_sim_cleanup_flag.
+       gzserver and gzclient below use wait_and_launch.sh as launch-prefix so
+       they block on that flag, guaranteeing the old server is gone first. -->
+  <group if="$(arg reset)">
+    <node name="session_cleanup"
+          pkg="ar_code_landing" type="cleanup_session.sh"
+          output="screen"/>
+  </group>
+
+  <!-- MRS drone spawner -->
+  <include file="$(find mrs_simulation)/launch/mrs_drone_spawner.launch"/>
+
+  <!-- ── Gazebo server (waits for cleanup flag to be removed) ─────────────── -->
+  <param name="/use_sim_time" value="true"/>
+  <param name="gazebo/enable_ros_network" value="true"/>
+
+  <arg unless="$(arg verbose)" name="gz_verbose_arg" value=""/>
+  <arg     if="$(arg verbose)" name="gz_verbose_arg" value="--verbose"/>
+
+  <node name="gazebo" pkg="gazebo_ros" type="gzserver"
+        launch-prefix="$(find ar_code_landing)/scripts/wait_and_launch.sh
+                        /tmp/landing_sim_cleanup_flag"
+        args="-e ode $(arg gz_verbose_arg) $(arg world)"
+        respawn="false" output="screen" required="true"/>
+
+  <!-- Suppress gazebo_ros_api log spam -->
+  <node name="gz_logger_suppress" pkg="rosservice" type="rosservice"
+        args="call --wait /gazebo/set_logger_level '{logger: ros.gazebo_ros, level: warn}'"
+        output="log"/>
+
+  <!-- ── Gazebo GUI (same flag gate so it waits for the server to be ready) ──
+       Using the same flag here so gzclient doesn't race to connect before
+       gzserver has initialised.  By the time the flag is gone the server is
+       fully alive.  -->
+  <group if="$(arg gui)">
+    <node name="gazebo_gui" pkg="gazebo_ros" type="gzclient"
+          launch-prefix="$(find ar_code_landing)/scripts/wait_and_launch.sh
+                          /tmp/landing_sim_cleanup_flag"
+          respawn="false" output="screen"/>
+  </group>
+
+  <!-- ── Spawn Otter USV at world origin ──────────────────────────────────────
+       spawn_model_idempotent: deletes leftover from previous session, then
+       spawns fresh; retries across the gzserver restart window. -->
+  <param name="robot_description"
+         command="$(find xacro)/xacro $(find otter_gazebo)/urdf/otter_gazebo.urdf.xacro
+                  imu_enabled:=true gps_enabled:=true lidar_enabled:=false
+                  velodyne_enabled:=false top_camera_enabled:=false
+                  ground_truth_enabled:=true direct_control_plugin:=false"/>
+  <node name="urdf_spawner" pkg="ar_code_landing" type="spawn_model_idempotent.py"
+        output="screen">
+    <param name="model_name"  value="otter"/>
+    <param name="model_type"  value="urdf"/>
+    <param name="urdf_param"  value="/robot_description"/>
+    <param name="spawn_x"     value="0.0"/>
+    <param name="spawn_y"     value="0.0"/>
+    <param name="spawn_z"     value="0.0"/>
+  </node>
+  <node pkg="robot_state_publisher" type="robot_state_publisher" name="rob_st_pub"/>
+
+  <!-- ── Invisible support platform at (5, 0, 0): 2×2×1 m block ───────────────
+       Top face at z=1.  transparency=1 makes it invisible to camera sensors
+       while keeping the collision geometry active (UAV rests on it). -->
+  <node name="spawn_platform" pkg="ar_code_landing" type="spawn_model_idempotent.py"
+        output="screen">
+    <param name="model_name"  value="validation_platform"/>
+    <param name="model_type"  value="sdf"/>
+    <param name="sdf_path"
+           value="$(find otter_usv_detector)/models/validation_platform.sdf"/>
+  </node>
+
+  <!-- ── Spawn X500 UAV at (5, 0, 2) — sitting on top of the 1 m platform ──
+       trigger_drone_spawn.py waits for /gazebo/model_states (Gazebo fully up)
+       before calling mrs_drone_spawner/spawn, and retries if it returns
+       "Gazebo not ready" so repeated launches always succeed. -->
+  <node name="spawn_drone" pkg="ar_code_landing" type="trigger_drone_spawn.py"
+        output="screen">
+    <param name="spawn_args"
+           value="1 x500 --enable-rangefinder --enable-ground-truth --pos 5 0 2 0"/>
+  </node>
+
+  <!-- ── Standalone kinematic gimbal model — initial z=2 matches UAV height ── -->
+  <node name="spawn_gimbal" pkg="ar_code_landing" type="spawn_model_idempotent.py"
+        output="screen">
+    <param name="model_name"  value="uav1_gimbal"/>
+    <param name="model_type"  value="sdf"/>
+    <param name="sdf_path"
+           value="$(find uav_gimbal)/models/gimbal_ghadron_standalone/model.sdf"/>
+    <param name="spawn_x"     value="5.0"/>
+    <param name="spawn_y"     value="0.0"/>
+    <param name="spawn_z"     value="2.0"/>
+  </node>
+
+  <!-- Gimbal position controller -->
+  <include file="$(find uav_gimbal)/launch/gimbal_controllers.launch">
+    <arg name="ns" value="uav1"/>
+  </include>
+
+  <!-- Ocean rangefinder: snaps below-water hits back to Z=0 -->
+  <include file="$(find ocean_rangefinder)/launch/bridge.launch">
+    <arg name="uav_name" value="uav1"/>
+  </include>
+
+</launch>

@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>uav_landing_evaluator</name>
+  <version>0.1.0</version>
+  <description>
+    Drop-test evaluator: repositions a free-falling rigid body above the USV
+    landing pad and records contact energy, touchdown angle, contact position,
+    and fall time for each scenario.  Prints a summary table and saves CSV.
+  </description>
+
+  <maintainer email="nttputus@gmail.com">maintainer</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>gazebo_ros</depend>
+  <depend>gazebo_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+</package>

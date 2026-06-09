@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<!--
+  climb_test.launch
+  ──────────────────
+  Standalone CLIMB verification.  Replicates PRE_ARMED → ARMING → CLIMBING
+  from ar_landing_sm_node using pure MAVROS (no MRS).
+
+  Prerequisites (must already be running):
+    roslaunch ar_code_landing usv_uav_gimbal_landing.launch
+
+  Do NOT run start_uav.launch — the MRS core stack it loads intercepts
+  OFFBOARD mode and will prevent this test from working.
+
+  Usage:
+    roslaunch ar_code_landing climb_test.launch
+    roslaunch ar_code_landing climb_test.launch target_alt_m:=5.0 hold_s:=20.0
+-->
+<launch>
+
+  <arg name="ns"              default="uav1"/>
+  <arg name="target_alt_m"   default="10.0"/>
+  <arg name="hover_thrust"   default="0.58"/>
+  <arg name="kp_z"           default="0.35"/>
+  <arg name="ki_z"           default="0.02"/>
+  <arg name="kd_z"           default="0.20"/>
+  <arg name="max_dthrust"    default="0.25"/>
+  <!-- Horizontal velocity damping (EKF2 velocity — no GPS needed, only IMU+baro) -->
+  <arg name="kd_vel"         default="1.0"/>   <!-- velocity → tilt gain [1/s] -->
+  <arg name="max_tilt_deg"   default="12.0"/>
+  <arg name="rate_hz"        default="20.0"/>
+  <arg name="prearm_s"       default="3.0"/>
+  <arg name="prearm_timeout_s" default="10.0"/>
+  <arg name="arming_timeout_s" default="30.0"/>
+  <arg name="climb_timeout_s"  default="90.0"/>
+  <arg name="hold_s"           default="10.0"/>
+
+  <node name="climb_test"
+        pkg="ar_code_landing"
+        type="climb_test_node.py"
+        output="screen">
+    <param name="ns"                value="$(arg ns)"/>
+    <param name="target_alt_m"      value="$(arg target_alt_m)"/>
+    <param name="hover_thrust"      value="$(arg hover_thrust)"/>
+    <param name="kp_z"              value="$(arg kp_z)"/>
+    <param name="ki_z"              value="$(arg ki_z)"/>
+    <param name="kd_z"              value="$(arg kd_z)"/>
+    <param name="max_dthrust"       value="$(arg max_dthrust)"/>
+    <param name="kd_vel"            value="$(arg kd_vel)"/>
+    <param name="max_tilt_deg"      value="$(arg max_tilt_deg)"/>
+    <param name="rate_hz"           value="$(arg rate_hz)"/>
+    <param name="prearm_s"          value="$(arg prearm_s)"/>
+    <param name="prearm_timeout_s"  value="$(arg prearm_timeout_s)"/>
+    <param name="arming_timeout_s"  value="$(arg arming_timeout_s)"/>
+    <param name="climb_timeout_s"   value="$(arg climb_timeout_s)"/>
+    <param name="hold_s"            value="$(arg hold_s)"/>
+  </node>
+
+</launch>

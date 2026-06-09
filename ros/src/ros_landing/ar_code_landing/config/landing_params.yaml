@@ -1,0 +1,76 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ar_code_landing — tunable parameters
+# ─────────────────────────────────────────────────────────────────────────────
+
+# UAV / simulation namespace
+ns: uav1
+
+# ── Gimbal ArUco tracker ──────────────────────────────────────────────────────
+gimbal_aruco_tracker:
+  rate_hz:           30.0    # control loop rate [Hz]
+  # World-position EMA filter (0=no update, 1=instant)
+  pos_filter_alpha:  0.4
+  max_pos_jump_m:    5.0     # outlier rejection threshold [m]
+  # PID gains (pixel-normalised errors, rad units)
+  kp_yaw:   0.15
+  ki_yaw:   0.02
+  kd_yaw:   0.05
+  kp_pitch: 0.15
+  ki_pitch: 0.02
+  kd_pitch: 0.05
+  max_integral:   0.3       # anti-windup [rad]
+  max_cmd_delta:  0.04      # max gimbal step per tick [rad]
+  error_deadband: 0.01      # suppress errors below this [rad]
+  lost_timeout_s: 3.0       # s without detection → LOST
+  # Validity gates
+  min_altitude_m: 2.0
+  min_pitch_rad:  0.5
+  # Gimbal base offset in drone body frame [m]
+  x_offset: 0.10
+  y_offset: 0.00
+  z_offset: 0.00
+
+# ── Landing controller ────────────────────────────────────────────────────────
+ar_landing_controller:
+  rate_hz:          20.0    # controller loop rate [Hz]
+  # Horizontal PD (proportional gain only for stability; derivative via filtered vel)
+  kp_xy:  0.40             # [1/s²] horizontal position gain
+  kd_xy:  0.20             # [1/s]  horizontal derivative gain
+  max_tilt_deg: 12.0       # maximum roll/pitch command [deg]
+  # Altitude PID (acts on Garmin range error)
+  hover_thrust:  0.58      # X500 hover thrust normalised [0-1]
+  kp_z:   0.35
+  ki_z:   0.02
+  kd_z:   0.20
+  max_thrust_delta: 0.25   # ± from hover_thrust
+  # ArUco position lost timeout before emergency hover
+  pose_timeout_s: 2.0
+  # Garmin calibration: deck surface is ~0.75 m above water;
+  # when garmin_range < deck_clearance the UAV is at deck level.
+  deck_height_m:  0.75     # USV ar_code panel face height above water [m]
+
+# ── State machine ─────────────────────────────────────────────────────────────
+ar_landing_sm:
+  # Target climb altitude before starting search [m]
+  climb_alt_m: 10.0
+  # Hover altitude above deck during ALIGN phase [m]
+  hold_alt_m:  5.0
+  # Alignment threshold: horizontal error below which ALIGN→DESCEND [m]
+  align_threshold_m:  0.6
+  align_settle_s:     3.0   # s below threshold before advancing
+  # Descent: rate [m/s] at which target altitude decreases
+  descent_rate_ms:    0.3
+  # Garmin range below which touch-down is declared [m]
+  # USV deck ≈ 0.75 m above water → touch_range 0.8 m ≈ just above deck surface
+  touch_range_m:      0.8
+  # ArUco tracking lost timeout in DESCEND before recovery hover [s]
+  descend_lost_timeout_s: 4.0
+  # State machine loop rate [Hz]
+  rate_hz: 10.0
+  # Timeouts
+  prearm_timeout_s:  10.0   # max wait for sensor initialisation before ARMING
+  arming_timeout_s:  30.0   # max wait for PX4 armed+OFFBOARD confirmation
+  climb_timeout_s:   60.0
+  nadir_timeout_s:   15.0
+  search_timeout_s:  60.0
+  align_timeout_s:  120.0

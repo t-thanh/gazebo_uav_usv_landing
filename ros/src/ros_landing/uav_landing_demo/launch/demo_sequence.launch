@@ -1,0 +1,292 @@
+<!--
+  demo_sequence.launch
+  ─────────────────────
+  Full autonomous landing demo: moving Otter USV + AR-code landing pipeline.
+
+  Scene
+  ─────
+  • USV spawns at (usv_start_x, 0, 0) and waits usv_delay_s before its thrusters
+    start.  Sea-state wrenches (heave / roll / pitch) are active from t = 0.
+  • UAV spawns at (uav_x, uav_y, 2) on an invisible platform that is:
+      uav_x = 12 m  ahead of the USV in the travel direction (+X)
+      uav_y =  3 m  to the side of the USV track (y = 0)
+    The platform is out of the USV's path.  The 3 m lateral offset keeps the
+    USV deck inside the nadir camera footprint:
+      10 m altitude, 67° H-FOV → x ±6.6 m, y = 3 ± 4.7 = −1.7 to 7.7 m.
+
+  Timing (defaults: usv_start_x = −5, usv_delay_s = 0, usv_speed = 0.5 m/s,
+                    uav_x = 12)
+  ──────────────────────────────────────────────────────────────────────────────
+    t =  0 s  USV starts moving from x = −5.  Drone PRE_ARMED → ARMING.
+    t = 34 s  USV reaches x = 12 m (drone x) — x = −5 + 0.5×34 = 12.
+              Drone is in ARUCO_SEARCH (arm ≈ 5 s + climb ≈ 25 s + nadir ≈ 5 s).
+              Camera covers x = 12 ± 6.6 = 5.4 … 18.6 m → USV centred in frame.
+    t = 47 s  USV exits camera FOV (x = 18.6).
+              Detection window ≈ 13 s → reliable ArUco acquisition.
+
+  State machine (via ar_landing_sm_node)
+  ───────────────────────────────────────
+    PRE_ARMED → ARMING → CLIMBING → GIMBAL_NADIR → ARUCO_SEARCH
+    → ALIGN → DESCEND → LANDED
+
+  Annotated camera view
+  ─────────────────────
+  demo_annotated_image_node draws ArUco bounding boxes + HUD overlay.
+  Published on: /uav_otter_landing/demo/annotated_image
+  Displayed by: image_view node (when gui:=true)
+
+  Key overrides
+  ─────────────
+    usv_delay_s:=20      # more arm buffer if drone is slow to arm
+    usv_speed:=0.3       # slower → longer in-frame window
+    uav_x:=15            # move drone further ahead for more detection margin
+    gui:=false           # headless mode
+
+  Run
+  ───
+    source devel/setup.bash
+    roslaunch uav_otter_landing demo_sequence.launch
+-->
+<launch>
+
+  <!-- ── Tunable args ───────────────────────────────────────────────────── -->
+  <arg name="gui"         default="true"/>
+  <arg name="verbose"     default="false"/>
+  <arg name="ns"          default="uav1"/>
+
+  <!-- USV motion -->
+  <arg name="usv_speed"    default="0.5"/>  <!-- m/s forward speed                   -->
+  <arg name="usv_start_x"  default="-5"/>   <!-- m: spawn USV close to drone area     -->
+  <arg name="usv_delay_s"  default="0"/>    <!-- s: 0 = move immediately at sim start  -->
+
+  <!-- UAV platform position:
+       uav_x = 12  — ahead of usv_start_x so USV approaches, not underneath at spawn
+       uav_y =  3  — side-offset for camera FOV (y coverage 3±4.7 = −1.7 to 7.7 m)
+       Both are integers: avoids float-parsing edge cases in MRS spawn_args string. -->
+  <arg name="uav_x"        default="12"/>   <!-- m: drone/platform x position         -->
+  <arg name="uav_y"        default="3"/>    <!-- m: drone/platform y (side of track)  -->
+
+  <!-- ── Session cleanup (kills stale gzserver before restart) ─────────── -->
+  <node name="session_cleanup" pkg="ar_code_landing" type="cleanup_session.sh"
+        output="screen"/>
+
+  <!-- ── Gazebo world ───────────────────────────────────────────────────── -->
+  <param name="/use_sim_time" value="true"/>
+
+  <arg unless="$(arg verbose)" name="gz_verbose_arg" value=""/>
+  <arg     if="$(arg verbose)" name="gz_verbose_arg" value="--verbose"/>
+
+  <node name="gazebo" pkg="gazebo_ros" type="gzserver"
+        launch-prefix="$(find ar_code_landing)/scripts/wait_and_launch.sh
+                        /tmp/landing_sim_cleanup_flag"
+        args="-e ode $(arg gz_verbose_arg)
+              $(find usv_worlds)/worlds/usv_uav.world"
+        respawn="false" output="screen" required="true"/>
+
+  <group if="$(arg gui)">
+    <node name="gazebo_gui" pkg="gazebo_ros" type="gzclient"
+          launch-prefix="$(find ar_code_landing)/scripts/wait_and_launch.sh
+                          /tmp/landing_sim_cleanup_flag"
+          respawn="false" output="screen"/>
+  </group>
+
+  <node name="gz_logger_suppress" pkg="rosservice" type="rosservice"
+        args="call --wait /gazebo/set_logger_level '{logger: ros.gazebo_ros, level: warn}'"
+        output="log"/>
+
+  <!-- ── Spawn Otter USV at start position ────────────────────────────── -->
+  <param name="robot_description"
+         command="$(find xacro)/xacro
+                  $(find otter_gazebo)/urdf/otter_gazebo.urdf.xacro
+                  imu_enabled:=true
+                  gps_enabled:=true
+                  lidar_enabled:=false
+                  velodyne_enabled:=false
+                  top_camera_enabled:=false
+                  ground_truth_enabled:=true
+                  direct_control_plugin:=false"/>
+
+  <node name="usv_spawner" pkg="ar_code_landing" type="spawn_model_idempotent.py"
+        output="screen">
+    <param name="model_name" value="otter"/>
+    <param name="model_type" value="urdf"/>
+    <param name="urdf_param" value="/robot_description"/>
+    <param name="spawn_x"    value="$(arg usv_start_x)"/>
+    <param name="spawn_y"    value="0.0"/>
+    <param name="spawn_z"    value="0.0"/>
+  </node>
+
+  <node pkg="robot_state_publisher" type="robot_state_publisher"
+        name="rob_st_pub"/>
+
+  <!-- ── Invisible takeoff platform — (uav_x, uav_y) ahead and to the side ─
+       demo_landing_platform.sdf has link centred at (0,0,0.5) in model frame
+       → top face at spawn_z + 1.  USV travels along y = 0; platform at y = 3
+       (extends y = 2 to 4) has ≥ 2 m clearance from USV hull edge at y = 1.  -->
+  <node name="spawn_platform" pkg="ar_code_landing" type="spawn_model_idempotent.py"
+        output="screen">
+    <param name="model_name" value="demo_landing_platform"/>
+    <param name="model_type" value="sdf"/>
+    <param name="sdf_path"
+           value="$(find uav_otter_landing)/models/demo_landing_platform.sdf"/>
+    <param name="spawn_x"    value="$(arg uav_x)"/>
+    <param name="spawn_y"    value="$(arg uav_y)"/>
+    <param name="spawn_z"    value="0.0"/>
+  </node>
+
+  <!-- ── MRS drone spawner + X500 ─────────────────────────────────────── -->
+  <include file="$(find mrs_simulation)/launch/mrs_drone_spawner.launch"/>
+
+  <!-- Integer uav_x / uav_y avoid float-parsing edge cases in the MRS spawn
+       string.  Drone sits 1 m above platform top face → spawn z = 2.        -->
+  <node name="spawn_drone" pkg="ar_code_landing" type="trigger_drone_spawn.py"
+        output="screen">
+    <param name="spawn_args" value="1 x500 --enable-rangefinder --enable-ground-truth --pos $(arg uav_x) $(arg uav_y) 2 0"/>
+  </node>
+
+  <!-- ── Standalone gimbal model ───────────────────────────────────────── -->
+  <node name="spawn_gimbal" pkg="ar_code_landing" type="spawn_model_idempotent.py"
+        output="screen">
+    <param name="model_name" value="uav1_gimbal"/>
+    <param name="model_type" value="sdf"/>
+    <param name="sdf_path"
+           value="$(find uav_gimbal)/models/gimbal_ghadron_standalone/model.sdf"/>
+    <param name="spawn_x"    value="$(arg uav_x)"/>
+    <param name="spawn_y"    value="$(arg uav_y)"/>
+    <param name="spawn_z"    value="2.0"/>
+  </node>
+
+  <include file="$(find uav_gimbal)/launch/gimbal_controllers.launch">
+    <arg name="ns" value="$(arg ns)"/>
+  </include>
+
+  <!-- Ocean rangefinder: maps sub-water Garmin hits back to z = 0 -->
+  <include file="$(find ocean_rangefinder)/launch/bridge.launch">
+    <arg name="uav_name" value="$(arg ns)"/>
+  </include>
+
+  <!-- ── USV thruster-based motion + sinusoidal sea-state ─────────────── -->
+  <node name="usv_motion" pkg="uav_otter_landing" type="usv_motion_node.py"
+        output="screen">
+    <rosparam command="load"
+              file="$(find uav_otter_landing)/config/usv_motion_params.yaml"/>
+    <param name="usv_speed"   value="$(arg usv_speed)"/>
+    <param name="usv_start_x" value="$(arg usv_start_x)"/>
+    <param name="usv_delay_s" value="$(arg usv_delay_s)"/>
+  </node>
+
+  <!-- ── AR-code landing pipeline ─────────────────────────────────────── -->
+
+  <!-- 1. ArUco / AprilTag pose estimator -->
+  <node name="aruco_pose_estimator"
+        pkg="otter_usv_detector"
+        type="aruco_pose_estimator_node.py"
+        output="screen">
+    <param name="gimbal_ns"     value="$(arg ns)"/>
+    <param name="outer_size_m"  value="2.0"/>
+    <param name="inner_size_m"  value="0.2"/>
+    <param name="base_x_offset" value="0.10"/>
+    <param name="base_y_offset" value="0.00"/>
+    <param name="base_z_offset" value="0.00"/>
+  </node>
+
+  <!-- 2. Gimbal ArUco tracker -->
+  <node name="gimbal_aruco_tracker"
+        pkg="ar_code_landing"
+        type="gimbal_aruco_tracker_node.py"
+        ns="ar_landing/gimbal_tracker"
+        output="screen">
+    <param name="ns"                value="$(arg ns)"/>
+    <param name="pose_topic"        value="/aruco_pose/outer/usv_in_cam"/>
+    <param name="odom_topic"        value="/$(arg ns)/ground_truth"/>
+    <param name="rate_hz"           value="30.0"/>
+    <param name="kp_yaw"            value="0.15"/>
+    <param name="ki_yaw"            value="0.02"/>
+    <param name="kd_yaw"            value="0.05"/>
+    <param name="kp_pitch"          value="0.15"/>
+    <param name="ki_pitch"          value="0.02"/>
+    <param name="kd_pitch"          value="0.05"/>
+    <param name="max_integral"      value="0.3"/>
+    <param name="max_cmd_delta"     value="0.04"/>
+    <param name="error_deadband"    value="0.01"/>
+    <param name="pos_filter_alpha"  value="0.4"/>
+    <param name="max_pos_jump_m"    value="5.0"/>
+    <param name="lost_timeout_s"    value="3.0"/>
+    <param name="min_altitude_m"    value="0.5"/>
+    <param name="min_pitch_rad"     value="0.5"/>
+    <param name="x_offset"          value="0.10"/>
+    <param name="y_offset"          value="0.00"/>
+    <param name="z_offset"          value="0.00"/>
+  </node>
+
+  <!-- 3. Landing attitude+altitude controller -->
+  <node name="ar_landing_controller"
+        pkg="ar_code_landing"
+        type="ar_landing_controller_node.py"
+        ns="ar_landing/landing_ctrl"
+        output="screen">
+    <param name="ns"                 value="$(arg ns)"/>
+    <param name="odom_topic"         value="/$(arg ns)/ground_truth"/>
+    <param name="rate_hz"            value="20.0"/>
+    <param name="kp_xy"              value="0.90"/>
+    <param name="kd_xy"              value="0.80"/>
+    <param name="max_tilt_deg"       value="25.0"/>
+    <param name="hover_thrust"       value="0.54"/>
+    <param name="kp_z"               value="0.20"/>
+    <param name="ki_z"               value="0.01"/>
+    <param name="kd_z"               value="0.60"/>
+    <param name="max_thrust_delta"   value="0.30"/>
+    <param name="pose_timeout_s"     value="2.0"/>
+    <param name="close_range_alt_m"  value="2.5"/>
+    <param name="close_range_xy_gain" value="3.0"/>
+    <param name="x_offset"           value="0.10"/>
+    <param name="y_offset"           value="0.00"/>
+    <param name="z_offset"           value="0.00"/>
+  </node>
+
+  <!-- 4. Landing state machine
+       search_timeout_s raised to 120 s (moving USV needs more search window).
+       align_timeout_s raised to 180 s (lateral correction from uav_y offset). -->
+  <node name="ar_landing_sm"
+        pkg="ar_code_landing"
+        type="ar_landing_sm_node.py"
+        ns="ar_landing/sm"
+        output="screen">
+    <param name="ns"                      value="$(arg ns)"/>
+    <param name="hover_thrust"            value="0.54"/>
+    <param name="climb_alt_m"             value="10.0"/>
+    <param name="hold_alt_m"              value="5.0"/>
+    <param name="align_threshold_m"       value="0.6"/>
+    <param name="align_settle_s"          value="3.0"/>
+    <param name="descent_rate_ms"         value="0.3"/>
+    <param name="touch_range_m"           value="0.4"/>
+    <param name="alt_down_rate_ms"        value="1.0"/>
+    <param name="close_descent_alt_m"     value="2.5"/>
+    <param name="desc_err_scale_m"        value="0.5"/>
+    <param name="desc_min_pos_factor"     value="0.05"/>
+    <param name="desc_min_alt_factor"     value="0.5"/>
+    <param name="descend_lost_timeout_s"  value="4.0"/>
+    <param name="rate_hz"                 value="20.0"/>
+    <param name="prearm_timeout_s"        value="10.0"/>
+    <param name="arming_timeout_s"        value="30.0"/>
+    <param name="climb_timeout_s"         value="60.0"/>
+    <param name="nadir_timeout_s"         value="15.0"/>
+    <param name="search_timeout_s"        value="120.0"/>
+    <param name="align_timeout_s"         value="180.0"/>
+  </node>
+
+  <!-- ── Annotated gimbal camera view ──────────────────────────────────── -->
+  <node name="demo_annotated_image" pkg="uav_otter_landing"
+        type="demo_annotated_image_node.py" output="screen">
+    <param name="ns" value="$(arg ns)"/>
+  </node>
+
+  <group if="$(arg gui)">
+    <node name="annotated_image_view" pkg="image_view" type="image_view"
+          args="image:=/uav_otter_landing/demo/annotated_image"
+          output="screen">
+      <param name="autosize" value="true"/>
+    </node>
+  </group>
+
+</launch>

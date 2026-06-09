@@ -1,0 +1,45 @@
+# ROS build artifacts
+ros/build/
+ros/devel/
+ros/logs/
+ros/install/
+ros/.catkin_tools/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# C++ build
+*.o
+*.so
+*.a
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp / scratch
+tmp/
+
+# Large generated data (store in separate repo or LFS)
+*.bag
+*.pt
+*.onnx
+*.weights
+dataset/
+dataset_gimbal/
+runs/
+
+# Reports / paper outputs (tracked separately or ignored)
+# Uncomment to ignore:
+# reports/
+# paper/

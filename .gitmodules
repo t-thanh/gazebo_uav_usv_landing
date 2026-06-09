@@ -1,0 +1,9 @@
+[submodule "ros/src/usv_sim"]
+	path = ros/src/usv_sim
+	url = https://github.com/t-thanh/usv_simulator.git
+[submodule "ros/src/uav_sim/simulation"]
+	path = ros/src/uav_sim/simulation
+	url = https://github.com/t-thanh/simulation.git
+[submodule "ros/src/uav_sim/uav_core"]
+	path = ros/src/uav_sim/uav_core
+	url = https://github.com/t-thanh/uav_core.git

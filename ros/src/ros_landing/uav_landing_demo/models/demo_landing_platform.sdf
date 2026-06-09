@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<!--
+  demo_landing_platform.sdf
+  ──────────────────────────
+  Static 2 × 2 × 1 m invisible block used as the UAV takeoff pad.
+
+  Link centre is at (0, 0, 0.5) in model-local frame — NO hardcoded world-frame
+  offset.  Spawn this model at the desired world position via SpawnModel; the
+  top face will be exactly 1 m above the spawn z coordinate.
+
+  UAV spawned at (spawn_x, spawn_y, spawn_z + 2) — 1 m above the top face.
+  (top face = spawn_z + 1, drone body clearance ~1 m → spawn_z + 2)
+
+  transparency=1 makes the mesh invisible to Gazebo camera sensors while
+  keeping collision geometry active so the UAV can rest on it.
+-->
+<sdf version="1.6">
+  <model name="demo_landing_platform">
+    <static>true</static>
+    <link name="link">
+      <pose>0 0 0.5 0 0 0</pose>
+      <collision name="collision">
+        <geometry>
+          <box><size>2 2 1</size></box>
+        </geometry>
+        <surface>
+          <friction>
+            <ode><mu>0.8</mu><mu2>0.8</mu2></ode>
+          </friction>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <transparency>1.0</transparency>
+        <geometry>
+          <box><size>2 2 1</size></box>
+        </geometry>
+        <material>
+          <ambient>0.55 0.55 0.55 1</ambient>
+          <diffuse>0.55 0.55 0.55 1</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

@@ -1,0 +1,14 @@
+<launch>
+  <arg name="uav_name" default="uav1" />
+
+  <node name="ocean_rangefinder" pkg="ocean_rangefinder" type="range_corrector.py" output="screen">
+    <!-- Intercept the raw gazebo output (remapped in SDF) -->
+    <remap from="~range_raw"      to="/$(arg uav_name)/garmin/range_raw" />
+    
+    <!-- Publish the corrected value to the standard topic used by MRS control -->
+    <remap from="~range_filtered" to="/$(arg uav_name)/garmin/range" />
+    
+    <!-- Dependency for height correction -->
+    <remap from="~odom"           to="/$(arg uav_name)/odometry/odom_main" />
+  </node>
+</launch>
