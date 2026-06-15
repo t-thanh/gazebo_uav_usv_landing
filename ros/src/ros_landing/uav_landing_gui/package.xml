@@ -12,9 +12,7 @@
 
   <buildtool_depend>catkin</buildtool_depend>
 
-  <build_depend>roscpp</build_depend>
   <build_depend>qtbase5-dev</build_depend>
-  <build_depend>rospy</build_depend>
 
   <depend>roscpp</depend>
   <depend>rospy</depend>

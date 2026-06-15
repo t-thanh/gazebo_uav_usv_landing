@@ -29,6 +29,12 @@ This is a **large, long build** (tens of minutes): it clones the project with
 all submodules, pulls the gitman-managed PX4 firmware (~1.4 GB) and MRS stack,
 compiles the whole catkin workspace, and downloads the trained YOLO weights.
 
+The YOLO inference stack (CUDA torch + ultralytics) is installed into a conda
+env (`yolo_training`, Python 3.10) that mirrors the development environment —
+ROS Noetic's system Python is 3.8, but the weights were trained under 3.10. The
+detector node runs under that interpreter via `$DETECTOR_PYTHON`; ROS itself
+stays on Python 3.8.
+
 The image is self-contained — it clones from GitHub at build time, so it can
 also be built directly from the remote without a local checkout:
 

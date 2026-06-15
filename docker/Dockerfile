@@ -36,6 +36,9 @@ ARG WEIGHTS_URL=https://github.com/t-thanh/otter_usv_detector/releases/download/
 ARG TORCH_VERSION=2.0.1+cu118
 ARG TORCHVISION_VERSION=0.15.2+cu118
 ARG ULTRALYTICS_VERSION=8.4.33
+# Change CACHE_BUST (e.g. --build-arg CACHE_BUST=$(date +%s)) to force a fresh
+# `git clone` of the project (and everything after it) without --no-cache.
+ARG CACHE_BUST=1
 
 # ── System + build dependencies ──────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -50,15 +53,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # gitman manages the large external UAV deps (PX4 firmware, MRS stack).
 RUN pip3 install --no-cache-dir gitman
 
-# YOLO inference stack (CUDA build of torch + ultralytics) into system python3.
-RUN pip3 install --no-cache-dir \
+# ── YOLO inference stack (conda env, mirrors the dev `yolo_training` env) ─────
+# ROS Noetic ships Python 3.8, but ultralytics/torch were trained/run under
+# Python 3.10. Rather than fight pip's resolver on 3.8, recreate the dev conda
+# env: a Python 3.10 `yolo_training` env with a CUDA build of torch + the exact
+# ultralytics version. ROS stays on its system Python 3.8; the detector node
+# runs under this interpreter via run_detector.sh ($DETECTOR_PYTHON), which
+# injects the ROS message/client packages onto PYTHONPATH (pure-Python, import
+# fine across 3.8/3.10; cv_bridge is intentionally not used).
+# NOTE: conda is intentionally NOT added to PATH — that would shadow ROS's
+# system Python 3.8 (with Miniforge's base Python) for every later build step
+# (PX4 deps, catkin build) and produce a broken image. The env interpreter is
+# referenced only by the absolute $DETECTOR_PYTHON path at runtime.
+ENV CONDA_DIR=/opt/conda
+ENV CONDA_ENV=yolo_training
+ENV DETECTOR_PYTHON=${CONDA_DIR}/envs/${CONDA_ENV}/bin/python
+
+RUN wget -q -O /tmp/miniforge.sh \
+        https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+    && bash /tmp/miniforge.sh -b -p ${CONDA_DIR} \
+    && rm /tmp/miniforge.sh \
+    && ${CONDA_DIR}/bin/conda create -y -n ${CONDA_ENV} python=3.10 \
+    && ${CONDA_DIR}/envs/${CONDA_ENV}/bin/pip install --no-cache-dir \
         torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} \
         --index-url https://download.pytorch.org/whl/cu118 \
-    && pip3 install --no-cache-dir ultralytics==${ULTRALYTICS_VERSION}
+    && ${CONDA_DIR}/envs/${CONDA_ENV}/bin/pip install --no-cache-dir \
+        ultralytics==${ULTRALYTICS_VERSION} rospkg pyyaml \
+    && ${CONDA_DIR}/bin/conda clean -afy
 
 # ── Clone the project (with all submodules) ──────────────────────────────────
 WORKDIR /opt
-RUN git clone --branch ${REPO_BRANCH} --recurse-submodules ${REPO_URL} gazebo_uav_usv_landing
+RUN echo "cache-bust: ${CACHE_BUST}" \
+    && git clone --branch ${REPO_BRANCH} --recurse-submodules ${REPO_URL} gazebo_uav_usv_landing
 
 ENV WS=/opt/gazebo_uav_usv_landing/ros
 WORKDIR ${WS}
@@ -68,7 +94,12 @@ RUN cd src/uav_sim/simulation && gitman install --force \
     && cd ${WS}/src/uav_sim/uav_core && gitman install --force
 
 # ── PX4 SITL build dependencies (no NuttX, no sim tools) ──────────────────────
-RUN ${WS}/src/uav_sim/simulation/ros_packages/px4_firmware/Tools/setup/ubuntu.sh \
+# PX4 1.13's requirements.txt uses legacy specifiers like `matplotlib>=3.0.*`
+# that modern pip rejects (`.*` is only valid with `==`/`!=`). Strip the trailing
+# `.*` from inequality specifiers before running the setup script.
+RUN PX4_REQ=${WS}/src/uav_sim/simulation/ros_packages/px4_firmware/Tools/setup/requirements.txt \
+    && sed -i -E 's/(>=?[0-9][0-9.]*)\.\*/\1/g' "$PX4_REQ" \
+    && ${WS}/src/uav_sim/simulation/ros_packages/px4_firmware/Tools/setup/ubuntu.sh \
         --no-nuttx --no-sim-tool \
     && pip3 install --no-cache-dir packaging toml \
     && rm -rf /var/lib/apt/lists/*
