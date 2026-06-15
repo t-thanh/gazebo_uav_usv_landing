@@ -35,7 +35,7 @@ ARG WEIGHTS_URL=https://github.com/t-thanh/otter_usv_detector/releases/download/
 # Pin the inference stack for reproducibility. cu118 wheels are py3.8-compatible.
 ARG TORCH_VERSION=2.0.1+cu118
 ARG TORCHVISION_VERSION=0.15.2+cu118
-ARG ULTRALYTICS_VERSION=8.2.103
+ARG ULTRALYTICS_VERSION=8.4.33
 
 # ── System + build dependencies ──────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
