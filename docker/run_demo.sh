@@ -25,6 +25,16 @@ DEVICE="${DEVICE:-0}"
 source /opt/ros/${ROS_DISTRO:-noetic}/setup.bash
 source /opt/gazebo_uav_usv_landing/ros/devel/setup.bash
 
+# MRS stack environment (normally set by the MRS shell setup). core.launch
+# fails hard if these are unset.
+export UAV_NAME=uav1
+export UAV_NUMBER=1
+export RUN_TYPE=simulation
+export UAV_TYPE=x500
+export WORLD_NAME=simulation
+export SENSORS="garmin_down"
+export ODOMETRY_TYPE="${ODOMETRY_TYPE:-gps}"
+
 echo "[demo] Starting roscore..."
 roscore &
 ROSCORE_PID=$!

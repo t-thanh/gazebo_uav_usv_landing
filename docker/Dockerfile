@@ -79,6 +79,7 @@ RUN wget -q -O /tmp/miniforge.sh \
         --index-url https://download.pytorch.org/whl/cu118 \
     && ${CONDA_DIR}/envs/${CONDA_ENV}/bin/pip install --no-cache-dir \
         ultralytics==${ULTRALYTICS_VERSION} rospkg pyyaml \
+    && ${CONDA_DIR}/envs/${CONDA_ENV}/bin/pip install --no-cache-dir "numpy<2" \
     && ${CONDA_DIR}/bin/conda clean -afy
 
 # ── Clone the project (with all submodules) ──────────────────────────────────
@@ -110,9 +111,12 @@ RUN PX4_DIR=${WS}/src/uav_sim/simulation/ros_packages/px4_firmware \
 # a `v<major>.<minor>.<patch>` tag. Force one onto HEAD (rev was 1.13.2-dev).
 RUN git -C ${WS}/src/uav_sim/simulation/ros_packages/px4_firmware tag -f v1.13.2 HEAD
 
-# ── geographiclib datasets (required by mavros at runtime) ────────────────────
-RUN MAVROS_GEO=$(find ${WS}/src/uav_sim/uav_core -path '*mavros/scripts/install_geographiclib_datasets.sh' | head -1) \
-    && [ -n "$MAVROS_GEO" ] && bash "$MAVROS_GEO" || echo "geographiclib script not found, skipping"
+# ── geographiclib geoid dataset (required by mavros at runtime) ───────────────
+# mavros raises a FATAL if the egm96-5 geoid is missing. geographiclib-tools
+# (pulled by rosdep) provides geographiclib-get-geoids.
+RUN apt-get update && apt-get install -y --no-install-recommends geographiclib-tools \
+    && geographiclib-get-geoids egm96-5 \
+    && rm -rf /var/lib/apt/lists/*
 
 # ── Workspace adjustments ─────────────────────────────────────────────────────
 # 1. otter_control needs usv_msgs (not in the fork) and is not used by the static
@@ -143,6 +147,11 @@ RUN apt-get update \
         ros-noetic-teleop-twist-keyboard \
         libncurses-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# System Python scipy: Ubuntu 20.04 ships 1.3.3, but the MRS/landing nodes that
+# run under system Python (gimbal_position_node, gimbal_tracker_node) call
+# scipy.spatial.transform.Rotation.identity(), added in scipy 1.4.
+RUN pip3 install --no-cache-dir "scipy==1.5.4"
 
 # ── Build the catkin workspace ───────────────────────────────────────────────
 # PX4 sitl_gazebo's FindMAVLink can't locate the nested workspace mavlink headers,
