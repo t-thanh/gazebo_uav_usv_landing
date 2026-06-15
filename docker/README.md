@@ -76,9 +76,23 @@ the UAV, then runs the climb + gimbal-nadir + tracker sequence.
 ```bash
 docker exec -it <container> bash
 source /opt/gazebo_uav_usv_landing/ros/devel/setup.bash
-rostopic echo /uav1/gimbal/tracker/tracking_status     # TRACKING / SEARCHING / LOST
-rostopic echo /uav1/gimbal/tracker/usv_world_pose      # EMA-smoothed USV position
-rqt_image_view /uav1/usv_detection/image               # annotated YOLO detections
+rostopic echo /uav1/gimbal/tracker/gimbal_tracker/tracking_status   # TRACKING / SEARCHING / LOST
+rostopic echo /uav1/gimbal/tracker/gimbal_tracker/usv_world_pose    # EMA-smoothed USV position
+rqt_image_view /uav1/usv_detection/image                           # annotated YOLO detections
+```
+
+### Headless run (no GUI / CI)
+
+Gazebo still renders the gimbal camera offscreen, which needs a display even
+with `GUI=false`. Provide a virtual one with `xvfb` (validated end-to-end:
+UAV → 20 m, gimbal nadir, YOLO ~5.5 Hz, tracker `TRACKING`):
+
+```bash
+docker run --rm --gpus all --name landing_demo \
+  -e GUI=false -e INIT_ALTITUDE=20.0 \
+  gazebo_uav_usv_landing \
+  bash -c 'Xvfb :99 -screen 0 1280x1024x24 >/dev/null 2>&1 & \
+           export DISPLAY=:99; exec /opt/gazebo_uav_usv_landing/docker/run_demo.sh'
 ```
 
 ### Demo options (env vars)
