@@ -20,7 +20,7 @@
   <!-- MRS UAV core stack -->
   <include file="$(find mrs_uav_general)/launch/core.launch">
     <arg name="config_uav_manager"
-         value="/home/t-thanh/Garage/uav_usv_sim/src/uav_sim/simulation/example_tmux_scripts/just_flying_bare_tmux/custom_configs/uav_manager.yaml"/>
+         value="$(find otter_gazebo)/config/uav_manager.yaml"/>
   </include>
 
   <!-- 1. Enable motors (5 s — EKF2 needs ~4 s to converge) -->
