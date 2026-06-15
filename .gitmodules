@@ -13,3 +13,6 @@
 [submodule "ros/src/ros_landing/gimbal_usv_tracker"]
 	path = ros/src/ros_landing/gimbal_usv_tracker
 	url = https://github.com/t-thanh/gimbal_usv_tracker.git
+[submodule "ros/src/ros_landing/otter_usv_detector"]
+	path = ros/src/ros_landing/otter_usv_detector
+	url = https://github.com/t-thanh/otter_usv_detector.git
