@@ -96,26 +96,61 @@ RUN cd src/uav_sim/simulation && gitman install --force \
 # ── PX4 SITL build dependencies (no NuttX, no sim tools) ──────────────────────
 # PX4 1.13's requirements.txt uses legacy specifiers like `matplotlib>=3.0.*`
 # that modern pip rejects (`.*` is only valid with `==`/`!=`). Strip the trailing
-# `.*` from inequality specifiers before running the setup script.
-RUN PX4_REQ=${WS}/src/uav_sim/simulation/ros_packages/px4_firmware/Tools/setup/requirements.txt \
-    && sed -i -E 's/(>=?[0-9][0-9.]*)\.\*/\1/g' "$PX4_REQ" \
-    && ${WS}/src/uav_sim/simulation/ros_packages/px4_firmware/Tools/setup/ubuntu.sh \
-        --no-nuttx --no-sim-tool \
+# `.*` from inequality specifiers before running the setup script, then restore
+# the file so the firmware git tree stays clean (see version tag below).
+RUN PX4_DIR=${WS}/src/uav_sim/simulation/ros_packages/px4_firmware \
+    && sed -i -E 's/(>=?[0-9][0-9.]*)\.\*/\1/g' "$PX4_DIR/Tools/setup/requirements.txt" \
+    && "$PX4_DIR/Tools/setup/ubuntu.sh" --no-nuttx --no-sim-tool \
+    && git -C "$PX4_DIR" checkout -- Tools/setup/requirements.txt \
     && pip3 install --no-cache-dir packaging toml \
     && rm -rf /var/lib/apt/lists/*
+
+# ── PX4 version tag ───────────────────────────────────────────────────────────
+# gitman checks out a bare commit (no tags), but PX4's version generator requires
+# a `v<major>.<minor>.<patch>` tag. Force one onto HEAD (rev was 1.13.2-dev).
+RUN git -C ${WS}/src/uav_sim/simulation/ros_packages/px4_firmware tag -f v1.13.2 HEAD
 
 # ── geographiclib datasets (required by mavros at runtime) ────────────────────
 RUN MAVROS_GEO=$(find ${WS}/src/uav_sim/uav_core -path '*mavros/scripts/install_geographiclib_datasets.sh' | head -1) \
     && [ -n "$MAVROS_GEO" ] && bash "$MAVROS_GEO" || echo "geographiclib script not found, skipping"
 
-# ── rosdep: resolve remaining ROS package dependencies (best-effort) ──────────
+# ── Workspace adjustments ─────────────────────────────────────────────────────
+# 1. otter_control needs usv_msgs (not in the fork) and is not used by the static
+#    USV demo -> CATKIN_IGNORE it.
+# 2. mavlink: ROS Noetic's only apt mavlink is now 2025.x, whose camera/gimbal
+#    message signatures break PX4 1.13's sitl_gazebo. The uav_core gitman fetch
+#    includes the matching mavlink 2022.8.8 under lib/ (CATKIN_IGNORE-d); expose
+#    it to catkin so the whole stack builds against one consistent mavlink.
+RUN touch ${WS}/src/usv_sim/otter_control/CATKIN_IGNORE \
+    && ln -sfn ../.gitman/mavlink-gbp-release ${WS}/src/uav_sim/uav_core/ros_packages/mavlink
+
+# ── rosdep + extra build deps ─────────────────────────────────────────────────
+# rosdep aborts on a few unresolvable/typo'd keys; skip those and install the
+# real packages behind them explicitly. Do NOT install ros-noetic-mavlink (see
+# above — wrong version). All listed apt packages are declared deps that rosdep
+# either skips or misses.
 RUN apt-get update \
     && rosdep update \
-    && rosdep install --from-paths src --ignore-src -y -r || true \
+    && rosdep install --from-paths src --ignore-src -y -r \
+        --skip-keys "qt effort_controllers mav_msgs opencv visualisation_msgs teleop_twist_keyboard" \
+        || true \
+    && apt-get install -y --no-install-recommends \
+        ros-noetic-geographic-msgs \
+        ros-noetic-tf2-sensor-msgs \
+        ros-noetic-robot-localization \
+        ros-noetic-velodyne-description \
+        ros-noetic-effort-controllers \
+        ros-noetic-teleop-twist-keyboard \
+        libncurses-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Build the catkin workspace ───────────────────────────────────────────────
+# PX4 sitl_gazebo's FindMAVLink can't locate the nested workspace mavlink headers,
+# so pin _MAVLINK_INCLUDE_DIR to the devel include space. Build mavlink first so
+# those headers exist before sitl_gazebo configures.
 RUN source /opt/ros/${ROS_DISTRO}/setup.bash \
+    && catkin config --cmake-args -D_MAVLINK_INCLUDE_DIR=${WS}/devel/include \
+    && catkin build mavlink --no-status -j$(nproc) \
     && catkin build --no-status -j$(nproc)
 
 # ── Fetch trained YOLO OBB weights into the detector package ──────────────────

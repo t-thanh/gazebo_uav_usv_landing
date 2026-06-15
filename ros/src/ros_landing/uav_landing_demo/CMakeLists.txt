@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(uav_otter_landing)
+project(uav_landing_demo)
 
 find_package(catkin REQUIRED COMPONENTS
   rospy
