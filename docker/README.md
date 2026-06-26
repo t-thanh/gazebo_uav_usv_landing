@@ -57,7 +57,7 @@ Allow the container to use your X server, then run with the GPU and X socket:
 xhost +local:root
 
 docker run --rm -it \
-  --gpus all --net host \
+  --gpus all \
   --env DISPLAY=$DISPLAY --env QT_X11_NO_MITSHM=1 \
   --volume /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --env USV_SPEED=1.0 --env WAVE=small \
@@ -86,7 +86,7 @@ waits for the UAV, then runs the full take-off → follow → land-on-USV flight
 | `GUI` | `true` | Show the Gazebo GUI (`false` = headless gzserver only) |
 
 ```bash
-docker run --rm -it --gpus all --net host \
+docker run --rm -it --gpus all \
   -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
   -e USV_SPEED=2.0 -e WAVE=medium \
   gazebo_uav_usv_landing
@@ -111,7 +111,7 @@ The original human-watched gimbal-tracking demo (UAV climbs to 20 m, YOLO + IBVS
 lock onto a **static** USV) is still available:
 
 ```bash
-docker run --rm -it --gpus all --net host \
+docker run --rm -it --gpus all \
   -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
   gazebo_uav_usv_landing \
   /opt/gazebo_uav_usv_landing/docker/run_demo.sh
@@ -120,7 +120,7 @@ docker run --rm -it --gpus all --net host \
 ### Drop to a shell
 
 ```bash
-docker run --rm -it --gpus all --net host \
+docker run --rm -it --gpus all \
   -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
   gazebo_uav_usv_landing bash
 # the workspace is sourced; then e.g.:
@@ -137,6 +137,11 @@ USV_SPEED=1.0 WAVE=small \
   (`xhost +local:root`) or missing `--gpus all`.
 - **UAV never appears / arming fails** — the deck is heaving; the demo opens the
   PX4 arming gate automatically, but on a `large` sea state arming can take longer.
+- **`PRE_ARMED → ABORT` with `Unknown parameter to set …` / `connected: False`** — PX4's
+  MAVLink couldn't bind its UDP port, so mavros never connected (no params → can't arm).
+  Cause: a **port collision** — do **not** add `--net host` (the demo is self-contained), and
+  make sure no other PX4 SITL is running on the machine (`pkill -9 -x px4`). Run isolated as shown
+  above and it connects on its own network namespace.
 
 ## Notes
 

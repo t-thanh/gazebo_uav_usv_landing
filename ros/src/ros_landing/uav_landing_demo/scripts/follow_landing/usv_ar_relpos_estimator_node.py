@@ -125,16 +125,26 @@ class UsvArRelPosEstimator:
         self._k_size = float(rospy.get_param('~k_size_px', 1.2))
 
         # ── detectors ─────────────────────────────────────────────────────────
-        params = cv2.aruco.DetectorParameters()
+        # OpenCV ArUco API differs by version: ≥4.7 uses ArucoDetector +
+        # DetectorParameters(); 4.2 (ROS Noetic's system cv2, e.g. in the Docker
+        # image) uses DetectorParameters_create() + the free fn cv2.aruco.detectMarkers().
+        # Support both so the same node runs on the dev box and in the container.
+        self._new_aruco = hasattr(cv2.aruco, 'ArucoDetector')
+        params = (cv2.aruco.DetectorParameters() if self._new_aruco
+                  else cv2.aruco.DetectorParameters_create())
         params.adaptiveThreshWinSizeMin = 3
         params.adaptiveThreshWinSizeMax = 53
         params.adaptiveThreshWinSizeStep = 10
         params.minMarkerPerimeterRate = 0.02
         params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-        self._april_det = cv2.aruco.ArucoDetector(
-            cv2.aruco.getPredefinedDictionary(_DICT_APRIL), params)
-        self._aruco_det = cv2.aruco.ArucoDetector(
-            cv2.aruco.getPredefinedDictionary(_DICT_ARUCO), params)
+        _apr = cv2.aruco.getPredefinedDictionary(_DICT_APRIL)
+        _aru = cv2.aruco.getPredefinedDictionary(_DICT_ARUCO)
+        if self._new_aruco:
+            self._april_det = cv2.aruco.ArucoDetector(_apr, params)
+            self._aruco_det = cv2.aruco.ArucoDetector(_aru, params)
+        else:
+            self._april_det = (_apr, params)   # (dictionary, params) for the free-fn API
+            self._aruco_det = (_aru, params)
 
         # ── live sensor state ─────────────────────────────────────────────────
         self._lock = threading.Lock()
@@ -159,6 +169,13 @@ class UsvArRelPosEstimator:
         self._n = {_OUTER_ID: 0, _INNER_ID: 0}
         rospy.loginfo('[ar_relpos] ns=%s outer=%.2fm inner=%.2fm  img=%s',
                       ns, self._sizes[_OUTER_ID], self._sizes[_INNER_ID], img_topic)
+
+    def _detect(self, det, gray):
+        """detectMarkers across OpenCV 4.2 (free fn) and >=4.7 (ArucoDetector)."""
+        if self._new_aruco:
+            return det.detectMarkers(gray)
+        d, params = det
+        return cv2.aruco.detectMarkers(gray, d, parameters=params)
 
     # ── sensor callbacks ──────────────────────────────────────────────────────
     def _cb_cinfo(self, msg):
@@ -203,8 +220,8 @@ class UsvArRelPosEstimator:
         p_opt, R_opt = _camera_fk(np.zeros(3), R_wb, self.base_off, *gimbal)
         gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
 
-        ac, aids, _ = self._april_det.detectMarkers(gray)
-        rc, rids, _ = self._aruco_det.detectMarkers(gray)
+        ac, aids, _ = self._detect(self._april_det, gray)
+        rc, rids, _ = self._detect(self._aruco_det, gray)
         dets = []
         if aids is not None:
             dets += [(c, int(i[0])) for c, i in zip(ac, aids) if int(i[0]) == _OUTER_ID]
