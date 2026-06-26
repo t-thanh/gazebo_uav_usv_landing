@@ -172,7 +172,13 @@ RUN wget -q -O \
 # Scripts come from the cloned repo, so the image builds even with no local
 # build context (e.g. `docker build github.com/t-thanh/gazebo_uav_usv_landing`).
 RUN chmod +x /opt/gazebo_uav_usv_landing/docker/entrypoint.sh \
-             /opt/gazebo_uav_usv_landing/docker/run_demo.sh
+             /opt/gazebo_uav_usv_landing/docker/run_demo.sh \
+             /opt/gazebo_uav_usv_landing/docker/run_takeoff_land_demo.sh \
+             /opt/gazebo_uav_usv_landing/ros/src/ros_landing/uav_landing_demo/scripts/follow_landing/run_takeoff_land_demo.sh \
+             /opt/gazebo_uav_usv_landing/ros/src/ros_landing/uav_landing_demo/scripts/follow_landing/run_follow_landing.sh
 
 ENTRYPOINT ["/opt/gazebo_uav_usv_landing/docker/entrypoint.sh"]
-CMD ["/opt/gazebo_uav_usv_landing/docker/run_demo.sh"]
+# Default demo: TAKE-OFF & LAND on the same moving USV (chosen per-phase controllers).
+# Selectable via env:  -e USV_SPEED=<0..2>  -e WAVE=<none|small|medium|large>  -e GUI=<true|false>
+# The gimbal-tracking demo is still available opt-in:  ... docker/run_demo.sh
+CMD ["/opt/gazebo_uav_usv_landing/docker/run_takeoff_land_demo.sh"]
